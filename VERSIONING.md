@@ -20,6 +20,7 @@
 | v1.1.0-beta.1 | feature/assembly-playground | 组装能力体验版，90 秒废品战车 + 经典回收 |
 | v1.1.0-beta.2-local | local/ram-head-preview | 仅本地预览，前置撞击头替换拖行铁球，不上传 GitHub |
 | v1.2.0-beta.1-local | codex/game-modes | 三地图闯关、限时与生存；仅本地保存，不上传 GitHub |
+| v1.2.0-beta.1 | codex/game-modes | 用户授权上传的网页 Demo，玩法与本地预览一致，独立预发布 Release |
 
 体验版在独立分支发布，首版主线和标签不变。[体验版下载](https://github.com/gu666-max/Greedy-Little-Magnet/releases/tag/v1.1.0-beta.1)。
 
@@ -29,7 +30,19 @@
 
 无需修改当前目录，也可分别解压 `local-backups/Greedy-Little-Magnet-v1.1.0-beta.2-local.zip` 与 `local-backups/Greedy-Little-Magnet-v1.2.0-beta.1-local.zip`，双击各自的 `index.html` 试玩。ZIP 不含本机测试依赖。关卡进度使用独立存储键，旧版不会读取或覆盖关卡进度。
 
-本版仅本地提交、标签和 ZIP 保存，没有 push 或 GitHub Release。
+v1.2.0-beta.1-local 是上传前的固定本地回退点；2026-10-06 用户随后授权上传，同一玩法以 v1.2.0-beta.1 独立发布，不移动或覆盖原本地标签。
+
+## 当前网页 Demo 与后续开发
+
+当前 Demo：[v1.2.0-beta.1 下载](https://github.com/gu666-max/Greedy-Little-Magnet/releases/tag/v1.2.0-beta.1)，源码在 codex/game-modes。发布 ZIP 为 Greedy-Little-Magnet-v1.2.0-beta.1.zip，解压后双击 index.html 即可离线游玩。
+
+网页 Demo 当前阶段停止新增玩法，后续根据用户指令继续。重新开始前先读 DEVELOPMENT.md，再检查工作区和项目记忆；发布标签始终固定。后续版本使用新分支与新标签，不覆盖当前 Demo。
+
+比较当前 Demo 而不修改开发目录，可执行：
+
+```powershell
+git worktree add --detach "../Greedy-Little-Magnet-demo-v1.2.0-beta.1" "v1.2.0-beta.1"
+```
 
 ## 回退之前的撞击头改动
 

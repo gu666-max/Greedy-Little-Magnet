@@ -1,6 +1,10 @@
 # 贪心小磁铁
 
-当前本地体验版本：**v1.2.0-beta.1-local**，新增三地图闯关与无限生存，保留 60 秒限时挑战和原有战车组装玩法。此版仅本地保存，未上传 GitHub；上一版 **v1.1.0-beta.2-local**、已发布体验版和稳定首版均保留，可回退。
+当前网页 Demo 版本：**v1.2.0-beta.1**，新增三地图闯关与无限生存，保留 60 秒限时挑战和原有战车组装玩法。用户已认可此模式框架，并授权保存到 GitHub；当前阶段开发告一段落，后续继续在此基础上迭代。上一版本地预览、已发布体验版和稳定首版均保留，可回退。
+
+- [当前 Demo 下载](https://github.com/gu666-max/Greedy-Little-Magnet/releases/tag/v1.2.0-beta.1)
+- [当前 Demo 源码分支](https://github.com/gu666-max/Greedy-Little-Magnet/tree/codex/game-modes)
+- [后续开发交接](DEVELOPMENT.md)
 
 - [版本下载](https://github.com/gu666-max/Greedy-Little-Magnet/releases)
 - [版本记录](CHANGELOG.md)
