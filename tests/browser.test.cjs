@@ -59,9 +59,21 @@ async function run() {
     await page.waitForFunction(()=>document.querySelector('#slot-saw').classList.contains('installed'));
     await page.waitForFunction(()=>!document.querySelector('#dash-button').disabled);
     await page.keyboard.press('KeyQ');assert.ok(await page.evaluate(()=>testGame.dashCooldown>0));
-    await page.evaluate(()=>{testGame.install('armor');testGame.install('ball');});
-    await page.waitForFunction(()=>document.querySelector('#slot-ball').classList.contains('installed'));
+    await page.evaluate(()=>{testGame.install('armor');testGame.install('ram');});
+    await page.waitForFunction(()=>document.querySelector('#slot-ram').classList.contains('installed'));
     await page.screenshot({path:path.join(screenshots,'assembly-playing.png'),fullPage:true});
+    await page.evaluate(()=>{
+      testGame.player={x:400,y:220,vx:0,vy:0,angle:0};testGame.target={x:400,y:220};testGame.facing={x:1,y:0};
+      testGame.items=[];testGame.cargo=[];testGame.obstacles=[{x:445,y:205,w:26,h:30,kind:'crate',hp:2}];
+      testGame.equipment={ram:1,spring:1,saw:0,armor:0};testGame.dashCooldown=0;testGame.dashTime=0;
+      testGame.bombs=[{x:510,y:220,vx:0,vy:0,radius:19,born:0,fuse:-1,dead:false}];
+    });
+    await page.keyboard.down('ArrowRight');await page.keyboard.press('KeyQ');
+    await page.waitForFunction(()=>testGame.cratesBroken>0&&testGame.bombs.some(b=>b.knockback>0));await page.keyboard.up('ArrowRight');
+    assert.equal(await page.evaluate(()=>testGame.health),3);
+    assert.ok((await page.locator('#slot-ram').innerText()).includes('前置撞击头'));
+    await page.screenshot({path:path.join(screenshots,'ram-head-playing.png'),fullPage:true});
+    checks.push('前置撞击头外观、键盘冲刺拆箱并击飞炸弹');
     await page.evaluate(()=>{testGame.elapsed=89.95;});await page.waitForSelector('#result-overlay:not(.hidden)');
     assert.ok((await page.locator('#result-comment').innerText()).includes('挑战完成'));await page.click('#home-button');
     await page.click('#mode-classic');assert.equal(await page.evaluate(()=>testGame.mode),'classic');

@@ -47,6 +47,7 @@
       case 'duplicate': toast('这个部件装满了，换成一枚大金币！'); break;
       case 'shield': toast('装甲挡住了爆炸！宝贝和生命都保住了'); tone(460, .15, .03); break;
       case 'dash': tone(240, .18, .03, 0, 'triangle', 900); break;
+      case 'ramHit': tone(160, .1, .03, 0, 'triangle', 380); toast('撞飞了！别回头，继续冲'); break;
       case 'collect':
         if (performance.now() - lastCollectSound > 65) { tone(event.itemType === 'gold' ? 1046 : 620 + game.cargo.length * 14, .065, .017); lastCollectSound = performance.now(); }
         break;
@@ -205,21 +206,19 @@
       rounded(-20, -16, 9, 32, 3, '#a190b4'); rounded(11,-16,9,32,3,'#a190b4');
       ctx.beginPath(); ctx.moveTo(-13,0); for (let i=0;i<6;i++) ctx.lineTo(-10+i*4,i%2?-10:10); ctx.lineTo(14,0); ctx.strokeStyle = '#78658e'; ctx.lineWidth = 3; ctx.stroke();
       line(-19,-12,-14,-12,'#d8cbe6',2); line(13,-12,18,-12,'#d8cbe6',2);
-    } else {
-      ellipse(1,3,27,27,'#61716d'); ellipse(-2,-1,24,24,'#889a91'); ellipse(-8,-10,8,5,'#b2bbaa');
-      ctx.beginPath(); ctx.arc(-1,0,18,-.4,2); ctx.strokeStyle = '#738780'; ctx.lineWidth = 2; ctx.stroke();
-      for (const [px,py] of [[-12,9],[11,10],[9,-12]]) ellipse(px,py,3,3,'#546e62');
+    } else if (type === 'ram') {
+      rounded(-13, 4, 26, 9, 3, '#71857d', '#5d7369', 1.5);
+      ctx.beginPath(); ctx.moveTo(-24,6); ctx.lineTo(-22,-11); ctx.lineTo(-13,-20); ctx.lineTo(13,-20); ctx.lineTo(22,-11); ctx.lineTo(24,6); ctx.closePath();
+      ctx.fillStyle = '#9da99b'; ctx.fill(); ctx.strokeStyle = '#60796b'; ctx.lineWidth = 2; ctx.stroke();
+      line(-18,-10,18,-10,'#d0d3bc',3);
+      line(-11,-15,-6,-10,'#d5b372',4); line(1,-15,6,-10,'#d5b372',4); line(12,-15,17,-10,'#d5b372',4);
+      rounded(-22,1,44,6,2,'#778d7e');
+      ellipse(-17,-3,2,2,'#4e695d'); ellipse(17,-3,2,2,'#4e695d');
     }
     ctx.restore();
   }
   function drawEquipment(t) {
     const p = game.player;
-    if (game.ball) {
-      line(p.x, p.y, game.ball.x, game.ball.y, '#536f6280', 4);
-      const length = Math.hypot(game.ball.x-p.x,game.ball.y-p.y);
-      for (let i=15;i<length;i+=14) { const ratio=i/length; ellipse(p.x+(game.ball.x-p.x)*ratio,p.y+(game.ball.y-p.y)*ratio,3,3,'#a7b49e'); }
-      ellipse(game.ball.x+4,game.ball.y+18,30,12,'#486a4a25'); drawModule('ball', game.ball.x, game.ball.y, 1, t);
-    }
     if (game.equipment.armor) {
       ctx.beginPath(); ctx.arc(p.x,p.y,game.radius+15,0,Math.PI*2); ctx.strokeStyle='#8fae8660'; ctx.lineWidth=7; ctx.stroke();
       for (let i=0;i<game.equipment.armor;i++) { const a=-Math.PI/2+i*2.1; drawModule('armor',p.x+Math.cos(a)*(game.radius+9),p.y+Math.sin(a)*(game.radius+9),.6,t); }
@@ -309,6 +308,12 @@
       line(shot.x - shot.vx * .023, shot.y - shot.vy * .023, shot.x, shot.y, '#f6edc2a0', 4); drawItem(shot);
     }
     drawEquipment(t); drawMagnet(t);
+    const ram = game.ramHead;
+    if (ram) {
+      ctx.save(); ctx.translate(ram.x, ram.y); ctx.rotate(Math.atan2(game.facing.y,game.facing.x)+Math.PI/2);
+      if (game.dashTime > 0) { rounded(-27,-23,54,35,9,'#e8ba5b50'); line(-21,-23,21,-23,'#f7d98c',4); }
+      drawModule('ram',0,0,1,t); ctx.restore();
+    }
     for (const ring of rings) {
       ctx.globalAlpha = ring.life * 1.2; ctx.beginPath(); ctx.arc(ring.x, ring.y, ring.radius + (1 - ring.life) * 50, 0, Math.PI * 2); ctx.strokeStyle = ring.color; ctx.lineWidth = 3; ctx.stroke();
     }
@@ -338,7 +343,7 @@
       for (const [type, module] of Object.entries(MODULES)) {
         const count = game.equipment[type], slot = $(`slot-${type}`);
         slot.classList.toggle('installed', count > 0);
-        slot.querySelector('small').textContent = count ? type === 'armor' ? `可挡 ${count} 次爆炸` : type === 'saw' ? `${count} 片 · 自动切箱` : type === 'ball' ? '拖动撞击 · +18 重量' : '冲刺已解锁' : '未组装';
+        slot.querySelector('small').textContent = count ? type === 'armor' ? `可挡 ${count} 次爆炸` : type === 'saw' ? `${count} 片 · 自动切箱` : type === 'ram' ? '顶碎木箱 · +4 重量' : '冲刺已解锁' : '未组装';
       }
       $('dash-button').disabled = !game.equipment.spring || game.dashCooldown > 0 || game.state !== 'playing';
       $('dash-button').innerHTML = game.dashCooldown > 0 ? `冷却 ${game.dashCooldown.toFixed(1)} 秒` : `弹簧冲刺 <kbd>Q</kbd>`;
@@ -360,7 +365,7 @@
     $('mode-edition').textContent = assembly ? '组装挑战 · 90 秒' : '经典回收 · 60 秒';
     $('field-mode').textContent = assembly ? 'ASSEMBLY / 01' : 'SCRAPYARD / 01';
     $('start-title').innerHTML = assembly ? '吸成一台战车。<br>还能开得回来吗？' : '宝贝都归你。<br>前提是，带得回来。';
-    $('start-description').innerHTML = assembly ? '吸锯片、装甲、弹簧和铁球，边捡边组装。<br>完成三项挑战，再把宝贝送回回收站！' : '吸走零件和金币，送回绿色回收站。<br>贪得越多，身体越笨重。小心炸弹也会被吸来！';
+    $('start-description').innerHTML = assembly ? '吸锯片、装甲、弹簧和撞击头，边捡边组装。<br>完成三项挑战，再把宝贝送回回收站！' : '吸走零件和金币，送回绿色回收站。<br>贪得越多，身体越笨重。小心炸弹也会被吸来！';
     $('start-duration').textContent = assembly ? '90 秒一局' : '60 秒一局';
     best = Math.max(0,Number(storage.get(bestKey(),'0')) || 0); dom['best-score'].textContent=best.toLocaleString('zh-CN');
     updateHud();
@@ -461,6 +466,6 @@
     if (toastDeadline && now > toastDeadline) { dom['event-toast'].classList.remove('visible'); toastDeadline = 0; }
     requestAnimationFrame(frame);
   }
-  const assemblyHelp = document.createElement('p'); assemblyHelp.id='assembly-help'; assemblyHelp.textContent='战车部件自动安装，回收和甩出不会卸掉：锯片切箱、装甲挡一次爆炸、铁球拖行撞击；弹簧用 Q / Shift 或冲刺按钮发动，冷却 5 秒。装备也增加负重。本局完成三项目标获得满挑战评价。'; $('close-help-button').before(assemblyHelp);
+  const assemblyHelp = document.createElement('p'); assemblyHelp.id='assembly-help'; assemblyHelp.textContent='战车部件自动安装，回收和甩出不会卸掉：锯片切箱、装甲挡一次爆炸、前置撞击头顶碎木箱；装上弹簧后，用 Q / Shift 或按钮冲刺，撞击头可击飞炸弹。冲刺冷却5秒，普通移动仍需躲炸弹。本局完成三项目标获得满挑战评价。'; $('close-help-button').before(assemblyHelp);
   updateSoundButton(); selectMode(selectedMode); resize(); updateHud(); requestAnimationFrame(frame);
 })();

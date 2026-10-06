@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f5f1e7">
-  <meta name="description" content="贪心小磁铁：吸零件组装废品战车，旋转锯片、装甲、弹簧与铁球改变你的玩法。另含60秒经典回收模式。离线可玩。">
+  <meta name="description" content="贪心小磁铁：吸零件组装废品战车，旋转锯片、装甲、弹簧与撞击头改变你的玩法。另含60秒经典回收模式。离线可玩。">
   <title>贪心小磁铁 · 再吸一块，就收手。</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23f5f1e7'/%3E%3Cpath d='M18 15v20a14 14 0 0 0 28 0V15' fill='none' stroke='%23ee735d' stroke-width='12'/%3E%3Cpath d='M46 15v20a14 14 0 0 1-14 14' fill='none' stroke='%235989ba' stroke-width='12'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
@@ -42,7 +42,7 @@
               <span class="panel-kicker">欢迎来到你的废品场</span>
               <div class="hero-magnet" aria-hidden="true"><svg viewBox="0 0 110 100"><ellipse cx="55" cy="88" rx="32" ry="6" fill="#243f3920"/><path d="M28 17v35a27 27 0 0 0 54 0V17" fill="none" stroke="#e47b65" stroke-width="23"/><path d="M82 17v35a27 27 0 0 1-27 27" fill="none" stroke="#648fba" stroke-width="23"/><path d="M16.5 12h23v16h-23zm54 0h23v16h-23z" fill="#f8f1df"/><circle cx="45" cy="62" r="4" fill="#253f3c"/><circle cx="65" cy="62" r="4" fill="#253f3c"/><path d="M48 72q7 7 14 0" fill="none" stroke="#253f3c" stroke-width="3" stroke-linecap="round"/><path d="m99 35 4-9m-92 9-5-9m94 27h9" stroke="#d6b76b" stroke-width="3" stroke-linecap="round"/></svg></div>
               <h2 id="start-title">吸成一台战车。<br>还能开得回来吗？</h2>
-              <p id="start-description">吸锯片、装甲、弹簧和铁球，边捡边组装。<br>完成三项挑战，再把宝贝送回回收站！</p>
+              <p id="start-description">吸锯片、装甲、弹簧和撞击头，边捡边组装。<br>完成三项挑战，再把宝贝送回回收站！</p>
               <div class="mode-select" aria-label="选择玩法模式"><button id="mode-assembly" class="mode-option active" aria-pressed="true">废品战车 <small>90 秒 · 组装能力</small></button><button id="mode-classic" class="mode-option" aria-pressed="false">经典回收 <small>60 秒 · 首版玩法</small></button></div>
               <button class="primary-button" id="start-button">开工，吸点宝贝 <span>↗</span></button>
               <div class="start-footnote"><span id="start-duration">90 秒一局</span><i></i><span>无需下载</span><i></i><span>支持触屏</span></div>
@@ -53,7 +53,7 @@
           <div class="overlay hidden" id="help-overlay"><div class="modal-panel help-panel"><span class="panel-kicker">小磁铁上岗指南</span><h2>怎么吸，才划算？</h2><ol><li><b>移动</b><span>鼠标指哪走哪，或用 WASD / 方向键。手机拖动场地。</span></li><li><b>吸取与甩出</b><span>按住鼠标或空格吸取，松开甩出部分零件。手机按住拖动吸取，松手甩出。</span></li><li><b>回来存钱</b><span>进入左下角绿色回收区自动入账。离开后可以再回来。</span></li><li><b>别太贪心</b><span>越重越难转弯。炸弹会扣一格生命并震落宝贝；甩出的零件能引爆炸弹、打碎木箱。</span></li></ol><p>时间结束只结算已回收分数。切换页面会自动暂停。</p><button class="primary-button" id="close-help-button">知道了，开吸 <span>✓</span></button></div></div>
         </div>
         <div class="assembly-strip" id="assembly-strip">
-          <div class="equipment-slots" aria-label="已组装能力"><div class="equipment-slot" id="slot-saw"><b>⚙</b><span>旋转锯片<small>未组装</small></span></div><div class="equipment-slot" id="slot-armor"><b>◇</b><span>装甲板<small>未组装</small></span></div><div class="equipment-slot" id="slot-spring"><b>ϟ</b><span>弹簧推进器<small>未组装</small></span></div><div class="equipment-slot" id="slot-ball"><b>●</b><span>重型铁球<small>未组装</small></span></div></div>
+          <div class="equipment-slots" aria-label="已组装能力"><div class="equipment-slot" id="slot-saw"><b>⚙</b><span>旋转锯片<small>未组装</small></span></div><div class="equipment-slot" id="slot-armor"><b>◇</b><span>装甲板<small>未组装</small></span></div><div class="equipment-slot" id="slot-spring"><b>ϟ</b><span>弹簧推进器<small>未组装</small></span></div><div class="equipment-slot" id="slot-ram"><b>▰</b><span>前置撞击头<small>未组装</small></span></div></div>
           <button class="dash-button" id="dash-button" disabled>弹簧冲刺 <kbd>Q</kbd></button>
           <div class="mission-list" id="mission-list" aria-label="本局挑战"></div>
         </div>

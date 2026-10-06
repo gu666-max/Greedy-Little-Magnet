@@ -6,7 +6,7 @@
     saw: { name: '旋转锯片', weight: 6, cap: 2, color: '#739aab', description: '自动切碎身边的木箱' },
     armor: { name: '装甲板', weight: 6, cap: 3, color: '#8aab80', description: '每块抵挡一次爆炸' },
     spring: { name: '弹簧推进器', weight: 4, cap: 1, color: '#b399c4', description: '按 Q / Shift 冲刺，冷却 5 秒' },
-    ball: { name: '重型铁球', weight: 18, cap: 1, color: '#ba9475', description: '拖动铁球撞碎木箱、引爆炸弹' }
+    ram: { name: '前置撞击头', weight: 4, cap: 1, color: '#ba9475', description: '顶碎木箱，冲刺击飞炸弹' }
   };
   const TYPES = {
     screw: { value: 10, weight: 1, radius: 9, color: '#8fa6a5' },
@@ -33,6 +33,10 @@
     get radius() { return 25 + Math.sqrt(this.cargo.length) * 3.2; }
     get range() { return 180 + Math.min(90, this.weight * 1.5); }
     get load() { return clamp(this.weight / 60, 0, 1); }
+    get ramHead() {
+      if (!this.equipment.ram) return null;
+      return { x: this.player.x + this.facing.x * (this.radius + 10), y: this.player.y + this.facing.y * (this.radius + 10), radius: 23 };
+    }
     get objectives() {
       return [
         { label: '组装 3 种部件', current: this.installedKinds.size, target: 3 },
@@ -50,14 +54,14 @@
       this.health = 3;
       this.banks = 0;
       this.collected = 0;
-      this.equipment = { saw: 0, armor: 0, spring: 0, ball: 0 };
+      this.equipment = { saw: 0, armor: 0, spring: 0, ram: 0 };
       this.installedKinds = new Set();
       this.cratesBroken = 0;
       this.moduleClock = 0;
       this.dashTime = 0;
       this.dashCooldown = 0;
       this.dashDirection = { x: 0, y: -1 };
-      this.ball = null;
+      this.facing = { x: 0, y: -1 };
       this.lastDirection = { x: 0, y: -1 };
       this.cargo = [];
       this.items = [];
@@ -91,7 +95,7 @@
         this.makeItem('saw', this.player.x + 65, this.player.y - 65);
         this.makeItem('spring', this.player.x - 85, this.player.y + 45);
         this.spawnModule('armor');
-        this.spawnModule('ball');
+        this.makeItem('ram', this.player.x + 90, this.player.y + 40);
       }
     }
     start(mode = this.mode) { this.mode = mode === 'assembly' ? 'assembly' : 'classic'; this.reset(); this.state = 'playing'; this.emit('start', { mode: this.mode }); }
@@ -101,7 +105,7 @@
     resize(width, height) {
       if (width === this.width && height === this.height) return;
       const sx = width / this.width, sy = height / this.height;
-      for (const entity of [...this.items, ...this.bombs, ...this.projectiles, this.player, this.target, ...(this.ball ? [this.ball] : [])]) {
+      for (const entity of [...this.items, ...this.bombs, ...this.projectiles, this.player, this.target]) {
         entity.x *= sx; entity.y *= sy;
       }
       for (const obstacle of this.obstacles) { obstacle.x *= sx; obstacle.y *= sy; }
@@ -146,7 +150,6 @@
       }
       this.equipment[type]++;
       this.installedKinds.add(type);
-      if (type === 'ball') this.ball = { x: this.player.x - this.lastDirection.x * 145, y: this.player.y - this.lastDirection.y * 145, radius: 28 };
       this.effect(this.player.x, this.player.y, config.color, 20);
       this.emit('install', { moduleType: type, count: this.equipment[type] });
       return true;
@@ -157,6 +160,7 @@
       if (!dx && !dy) { dx = this.target.x - this.player.x; dy = this.target.y - this.player.y; }
       const length = Math.hypot(dx, dy);
       this.dashDirection = length > 5 || input.x || input.y ? { x: dx / length, y: dy / length } : { ...this.lastDirection };
+      this.facing = { ...this.dashDirection };
       this.dashTime = .28;
       this.dashCooldown = 5;
       this.invincible = Math.max(this.invincible, .4);
@@ -172,15 +176,19 @@
           for (const o of [...this.obstacles]) if (o.kind === 'crate' && this.intersects(blade, 20, o)) this.breakCrate(o);
         }
       }
-      if (this.ball) {
-        const ball = this.ball, length = distance(ball, p);
-        if (length > 145) {
-          ball.x = p.x + (ball.x - p.x) / length * 145;
-          ball.y = p.y + (ball.y - p.y) / length * 145;
+      const ram = this.ramHead;
+      if (ram) {
+        for (const o of [...this.obstacles]) if (o.kind === 'crate' && this.intersects(ram, ram.radius, o)) this.breakCrate(o);
+        if (this.dashTime > 0) for (const bomb of this.bombs) {
+          if (!bomb.dead && !bomb.knockback && distance(ram, bomb) < ram.radius + bomb.radius) {
+            bomb.vx = this.dashDirection.x * 1100;
+            bomb.vy = this.dashDirection.y * 1100;
+            bomb.knockback = .65;
+            if (bomb.fuse < 0) bomb.fuse = 2.6;
+            this.effect(bomb.x, bomb.y, '#e0ba78', 8);
+            this.emit('ramHit');
+          }
         }
-        ball.x = clamp(ball.x, 52, this.width - 52); ball.y = clamp(ball.y, 60, this.height - 52);
-        for (const o of [...this.obstacles]) if (o.kind === 'crate' && this.intersects(ball, ball.radius, o)) this.breakCrate(o);
-        for (const bomb of this.bombs) if (!bomb.dead && distance(ball, bomb) < ball.radius + bomb.radius) this.explode(bomb);
       }
       this.moduleClock += dt;
       if (this.mode === 'assembly' && this.moduleClock >= 12) {
@@ -331,6 +339,13 @@
       else { p.vx += (dx * speed - p.vx) * turn; p.vy += (dy * speed - p.vy) * turn; }
       p.x += p.vx * dt; p.y += p.vy * dt;
       this.collidePlayer();
+      if (this.dashTime <= 0 && Math.hypot(p.vx, p.vy) > 15) {
+        const angle = Math.atan2(p.vy, p.vx);
+        const current = Math.atan2(this.facing.y, this.facing.x);
+        const delta = Math.atan2(Math.sin(angle - current), Math.cos(angle - current));
+        const next = current + delta * (1 - Math.exp(-dt * 14));
+        this.facing = { x: Math.cos(next), y: Math.sin(next) };
+      }
       const desired = clamp(p.vx / 900, -.35, .35);
       p.angle += (desired - p.angle) * Math.min(1, dt * 5);
 
@@ -362,14 +377,15 @@
       for (const bomb of this.bombs) {
         if (bomb.dead) continue;
         bomb.born = Math.max(0, bomb.born - dt);
+        bomb.knockback = Math.max(0, (bomb.knockback || 0) - dt);
         const dist = distance(bomb, p);
-        if (this.sucking && dist < this.range + 8 && !this.inBase(p)) {
+        if (this.sucking && bomb.knockback <= 0 && dist < this.range + 8 && !this.inBase(p)) {
           if (bomb.fuse < 0) { bomb.fuse = 2.6; this.emit('fuse'); }
           const force = 280 + (1 - dist / this.range) * 530;
           bomb.vx += (p.x - bomb.x) / Math.max(1, dist) * force * dt;
           bomb.vy += (p.y - bomb.y) / Math.max(1, dist) * force * dt;
         }
-        bomb.vx *= Math.exp(-dt * 1.8); bomb.vy *= Math.exp(-dt * 1.8);
+        bomb.vx *= Math.exp(-dt * (bomb.knockback > 0 ? .7 : 1.8)); bomb.vy *= Math.exp(-dt * (bomb.knockback > 0 ? .7 : 1.8));
         bomb.x = clamp(bomb.x + bomb.vx * dt, 50, this.width - 50);
         bomb.y = clamp(bomb.y + bomb.vy * dt, 65, this.height - 45);
         // No attraction through scenery: a bomb can be blocked by a crate or machine.
@@ -382,7 +398,7 @@
           bomb.vx *= .15; bomb.vy *= .15;
         }
         if (bomb.fuse >= 0) bomb.fuse -= dt;
-        if (bomb.born <= 0 && (distance(bomb, p) < this.radius + 18 || (bomb.fuse < .001 && bomb.fuse > -.1))) this.explode(bomb);
+        if (bomb.born <= 0 && ((bomb.knockback <= 0 && distance(bomb, p) < this.radius + 18) || (bomb.fuse < .001 && bomb.fuse > -.1))) this.explode(bomb);
         if (this.state !== 'playing') break;
       }
       this.bombs = this.bombs.filter(b => !b.dead);
