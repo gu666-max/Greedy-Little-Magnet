@@ -2,6 +2,12 @@
   'use strict';
   const clamp = (n, low, high) => Math.max(low, Math.min(high, n));
   const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const MODULES = {
+    saw: { name: '旋转锯片', weight: 6, cap: 2, color: '#739aab', description: '自动切碎身边的木箱' },
+    armor: { name: '装甲板', weight: 6, cap: 3, color: '#8aab80', description: '每块抵挡一次爆炸' },
+    spring: { name: '弹簧推进器', weight: 4, cap: 1, color: '#b399c4', description: '按 Q / Shift 冲刺，冷却 5 秒' },
+    ball: { name: '重型铁球', weight: 18, cap: 1, color: '#ba9475', description: '拖动铁球撞碎木箱、引爆炸弹' }
+  };
   const TYPES = {
     screw: { value: 10, weight: 1, radius: 9, color: '#8fa6a5' },
     gear: { value: 25, weight: 2, radius: 13, color: '#86979b' },
@@ -9,6 +15,7 @@
     coin: { value: 60, weight: 1, radius: 10, color: '#e7bd55' },
     gold: { value: 120, weight: 2, radius: 14, color: '#dfb14a' }
   };
+  for (const [type, config] of Object.entries(MODULES)) TYPES[type] = { value: 0, weight: 0, radius: 19, color: config.color, module: true };
 
   class Game {
     constructor(options = {}) {
@@ -18,22 +25,40 @@
       this.height = options.height || 760;
       this.sequence = 0;
       this.state = 'ready';
+      this.mode = 'classic';
       this.reset();
     }
     get cargoValue() { return this.cargo.reduce((sum, item) => sum + item.value, 0); }
-    get weight() { return this.cargo.reduce((sum, item) => sum + item.weight, 0); }
+    get weight() { return this.cargo.reduce((sum, item) => sum + item.weight, 0) + Object.entries(this.equipment || {}).reduce((sum, [type, count]) => sum + MODULES[type].weight * count, 0); }
     get radius() { return 25 + Math.sqrt(this.cargo.length) * 3.2; }
     get range() { return 180 + Math.min(90, this.weight * 1.5); }
     get load() { return clamp(this.weight / 60, 0, 1); }
+    get objectives() {
+      return [
+        { label: '组装 3 种部件', current: this.installedKinds.size, target: 3 },
+        { label: '拆掉 3 个木箱', current: this.cratesBroken, target: 3 },
+        { label: '回收 1500 分', current: this.score, target: 1500 }
+      ];
+    }
     rand(low, high) { return low + this.random() * (high - low); }
     emit(type, data = {}) { this.onEvent({ type, ...data }); }
     reset() {
-      this.time = 60;
+      this.duration = this.mode === 'assembly' ? 90 : 60;
+      this.time = this.duration;
       this.elapsed = 0;
       this.score = 0;
       this.health = 3;
       this.banks = 0;
       this.collected = 0;
+      this.equipment = { saw: 0, armor: 0, spring: 0, ball: 0 };
+      this.installedKinds = new Set();
+      this.cratesBroken = 0;
+      this.moduleClock = 0;
+      this.dashTime = 0;
+      this.dashCooldown = 0;
+      this.dashDirection = { x: 0, y: -1 };
+      this.ball = null;
+      this.lastDirection = { x: 0, y: -1 };
       this.cargo = [];
       this.items = [];
       this.bombs = [];
@@ -61,15 +86,22 @@
       // A small, reachable first reward teaches collection before danger appears.
       for (let i = 0; i < 7; i++) this.makeItem('coin', this.player.x + 50 + (i % 3) * 28, this.player.y - 50 + Math.floor(i / 3) * 30);
       for (let i = 0; i < 3; i++) this.spawnBomb();
+      if (this.mode === 'assembly') {
+        for (const [rx, ry] of [[.5, .34], [.57, .7], [.85, .17]]) this.obstacles.push({ x: this.width * rx, y: this.height * ry, w: 65, h: 56, kind: 'crate', hp: 2 });
+        this.makeItem('saw', this.player.x + 65, this.player.y - 65);
+        this.makeItem('spring', this.player.x - 85, this.player.y + 45);
+        this.spawnModule('armor');
+        this.spawnModule('ball');
+      }
     }
-    start() { this.reset(); this.state = 'playing'; this.emit('start'); }
+    start(mode = this.mode) { this.mode = mode === 'assembly' ? 'assembly' : 'classic'; this.reset(); this.state = 'playing'; this.emit('start', { mode: this.mode }); }
     pause() { if (this.state === 'playing') { this.state = 'paused'; this.sucking = false; } }
     resume() { if (this.state === 'paused') this.state = 'playing'; }
     home() { this.state = 'ready'; this.reset(); }
     resize(width, height) {
       if (width === this.width && height === this.height) return;
       const sx = width / this.width, sy = height / this.height;
-      for (const entity of [...this.items, ...this.bombs, ...this.projectiles, this.player, this.target]) {
+      for (const entity of [...this.items, ...this.bombs, ...this.projectiles, this.player, this.target, ...(this.ball ? [this.ball] : [])]) {
         entity.x *= sx; entity.y *= sy;
       }
       for (const obstacle of this.obstacles) { obstacle.x *= sx; obstacle.y *= sy; }
@@ -99,6 +131,63 @@
       const type = roll < .37 ? 'screw' : roll < .63 ? 'gear' : roll < .78 ? 'can' : roll < .97 ? 'coin' : 'gold';
       const p = this.freePosition(TYPES[type].radius);
       this.makeItem(type, p.x, p.y);
+    }
+    spawnModule(type) {
+      if (this.mode !== 'assembly') return;
+      const p = this.freePosition(25); this.makeItem(type, p.x, p.y);
+    }
+    install(type) {
+      if (this.mode !== 'assembly' || !MODULES[type]) return false;
+      const config = MODULES[type];
+      if (this.equipment[type] >= config.cap) {
+        this.makeItem('gold', this.player.x, this.player.y);
+        this.emit('duplicate', { moduleType: type });
+        return false;
+      }
+      this.equipment[type]++;
+      this.installedKinds.add(type);
+      if (type === 'ball') this.ball = { x: this.player.x - this.lastDirection.x * 145, y: this.player.y - this.lastDirection.y * 145, radius: 28 };
+      this.effect(this.player.x, this.player.y, config.color, 20);
+      this.emit('install', { moduleType: type, count: this.equipment[type] });
+      return true;
+    }
+    dash(input = {}) {
+      if (this.state !== 'playing' || !this.equipment.spring || this.dashCooldown > 0) return false;
+      let dx = input.x || 0, dy = input.y || 0;
+      if (!dx && !dy) { dx = this.target.x - this.player.x; dy = this.target.y - this.player.y; }
+      const length = Math.hypot(dx, dy);
+      this.dashDirection = length > 5 || input.x || input.y ? { x: dx / length, y: dy / length } : { ...this.lastDirection };
+      this.dashTime = .28;
+      this.dashCooldown = 5;
+      this.invincible = Math.max(this.invincible, .4);
+      this.emit('dash');
+      return true;
+    }
+    updateEquipment(dt) {
+      const p = this.player;
+      if (this.equipment.saw) {
+        for (let i = 0; i < this.equipment.saw; i++) {
+          const angle = this.elapsed * 3.5 + i * Math.PI;
+          const blade = { x: p.x + Math.cos(angle) * (this.radius + 25), y: p.y + Math.sin(angle) * (this.radius + 25) };
+          for (const o of [...this.obstacles]) if (o.kind === 'crate' && this.intersects(blade, 20, o)) this.breakCrate(o);
+        }
+      }
+      if (this.ball) {
+        const ball = this.ball, length = distance(ball, p);
+        if (length > 145) {
+          ball.x = p.x + (ball.x - p.x) / length * 145;
+          ball.y = p.y + (ball.y - p.y) / length * 145;
+        }
+        ball.x = clamp(ball.x, 52, this.width - 52); ball.y = clamp(ball.y, 60, this.height - 52);
+        for (const o of [...this.obstacles]) if (o.kind === 'crate' && this.intersects(ball, ball.radius, o)) this.breakCrate(o);
+        for (const bomb of this.bombs) if (!bomb.dead && distance(ball, bomb) < ball.radius + bomb.radius) this.explode(bomb);
+      }
+      this.moduleClock += dt;
+      if (this.mode === 'assembly' && this.moduleClock >= 12) {
+        this.moduleClock = 0;
+        const available = Object.keys(MODULES).filter(type => this.equipment[type] < MODULES[type].cap && !this.items.some(item => item.type === type));
+        if (available.length) this.spawnModule(available[Math.floor(this.random() * available.length)]);
+      }
     }
     spawnBomb() {
       let p;
@@ -152,33 +241,45 @@
       this.shake = Math.max(this.shake, .24);
       this.emit('explosion', { x: bomb.x, y: bomb.y });
       if (distance(this.player, bomb) < 90 + this.radius && this.invincible <= 0 && !this.inBase(this.player)) {
-        this.health--;
-        this.invincible = 2;
-        const count = Math.ceil(this.cargo.length * .45);
-        for (let i = 0; i < count; i++) {
-          const item = this.cargo.pop(), angle = this.rand(0, Math.PI * 2);
-          this.makeItem(item.type, clamp(this.player.x + Math.cos(angle) * 60, 40, this.width - 40), clamp(this.player.y + Math.sin(angle) * 60, 40, this.height - 40), { vx: Math.cos(angle) * 170, vy: Math.sin(angle) * 170, cooldown: 1.1 });
+        if (this.equipment.armor > 0) {
+          this.equipment.armor--;
+          this.invincible = 1.2;
+          this.effect(this.player.x, this.player.y, MODULES.armor.color, 18);
+          this.emit('shield');
+        } else {
+          this.health--;
+          this.invincible = 2;
+          const count = Math.ceil(this.cargo.length * .45);
+          for (let i = 0; i < count; i++) {
+            const item = this.cargo.pop(), angle = this.rand(0, Math.PI * 2);
+            this.makeItem(item.type, clamp(this.player.x + Math.cos(angle) * 60, 40, this.width - 40), clamp(this.player.y + Math.sin(angle) * 60, 40, this.height - 40), { vx: Math.cos(angle) * 170, vy: Math.sin(angle) * 170, cooldown: 1.1 });
+          }
+          this.emit('damage', { health: this.health });
         }
-        this.emit('damage', { health: this.health });
-        if (this.health <= 0) this.end('health');
       }
       for (const obstacle of [...this.obstacles]) {
         if (obstacle.kind === 'crate' && this.intersects(bomb, 95, obstacle)) this.breakCrate(obstacle);
       }
+      if (this.health <= 0) this.end('health');
     }
     breakCrate(obstacle) {
       const i = this.obstacles.indexOf(obstacle);
       if (i < 0) return;
       this.obstacles.splice(i, 1);
+      this.cratesBroken++;
       this.effect(obstacle.x + obstacle.w / 2, obstacle.y + obstacle.h / 2, '#bd9367', 18);
       for (let j = 0; j < 7; j++) this.makeItem(j < 3 ? 'coin' : 'gear', obstacle.x + this.rand(5, obstacle.w - 5), obstacle.y + this.rand(5, obstacle.h - 5));
+      if (this.mode === 'assembly' && this.cratesBroken % 2 === 0) {
+        const missing = Object.keys(MODULES).filter(type => this.equipment[type] < MODULES[type].cap);
+        if (missing.length) this.makeItem(missing[Math.floor(this.random() * missing.length)], obstacle.x + obstacle.w / 2, obstacle.y + obstacle.h / 2);
+      }
       this.emit('crate');
     }
     end(reason) {
       if (this.state !== 'playing') return;
       this.state = 'ended';
       this.sucking = false;
-      this.emit('end', { reason, score: this.score, banks: this.banks, items: this.collected, lost: this.cargoValue });
+      this.emit('end', { reason, score: this.score, banks: this.banks, items: this.collected, lost: this.cargoValue, mode: this.mode, goals: this.objectives.filter(goal => goal.current >= goal.target).length });
     }
     collidePlayer() {
       const p = this.player, r = this.radius;
@@ -205,11 +306,13 @@
       if (this.state !== 'playing') return;
       dt = clamp(dt, 0, .05);
       this.elapsed += dt;
-      this.time = Math.max(0, 60 - this.elapsed);
+      this.time = Math.max(0, this.duration - this.elapsed);
       this.bankCooldown = Math.max(0, this.bankCooldown - dt);
       this.invincible = Math.max(0, this.invincible - dt);
       this.fullNotice = Math.max(0, this.fullNotice - dt);
       this.shake = Math.max(0, this.shake - dt);
+      this.dashTime = Math.max(0, this.dashTime - dt);
+      this.dashCooldown = Math.max(0, this.dashCooldown - dt);
       const p = this.player;
       const speed = 300 / (1 + this.weight / 48);
       let dx = input.x || 0, dy = input.y || 0;
@@ -223,8 +326,9 @@
         this.target.x = p.x; this.target.y = p.y;
       }
       const turn = 1 - Math.exp(-dt * (9 / (1 + this.weight / 22)));
-      p.vx += (dx * speed - p.vx) * turn;
-      p.vy += (dy * speed - p.vy) * turn;
+      if (dx || dy) { const len = Math.hypot(dx, dy); this.lastDirection = { x: dx / len, y: dy / len }; }
+      if (this.dashTime > 0) { p.vx = this.dashDirection.x * 850; p.vy = this.dashDirection.y * 850; }
+      else { p.vx += (dx * speed - p.vx) * turn; p.vy += (dy * speed - p.vy) * turn; }
       p.x += p.vx * dt; p.y += p.vy * dt;
       this.collidePlayer();
       const desired = clamp(p.vx / 900, -.35, .35);
@@ -234,7 +338,7 @@
         const item = this.items[i];
         item.cooldown = Math.max(0, item.cooldown - dt);
         const dist = distance(item, p);
-        if (this.sucking && item.cooldown <= 0 && dist < this.range && this.cargo.length < 42) {
+        if (this.sucking && item.cooldown <= 0 && dist < this.range && (item.module || this.cargo.length < 42)) {
           const force = 550 + (1 - dist / this.range) * 1500;
           item.vx += (p.x - item.x) / Math.max(1, dist) * force * dt;
           item.vy += (p.y - item.y) / Math.max(1, dist) * force * dt;
@@ -243,14 +347,17 @@
         item.x = clamp(item.x + item.vx * dt, 40, this.width - 40);
         item.y = clamp(item.y + item.vy * dt, 50, this.height - 40);
         item.angle += item.spin * dt * Math.min(1, Math.hypot(item.vx, item.vy) / 80);
-        if (this.sucking && item.cooldown <= 0 && distance(item, p) < this.radius + item.radius && this.cargo.length < 42) {
+        if (this.sucking && item.cooldown <= 0 && distance(item, p) < this.radius + item.radius && (item.module || this.cargo.length < 42)) {
           this.items.splice(i, 1);
-          this.cargo.push({ ...item, attachment: this.rand(0, Math.PI * 2) });
+          if (item.module) this.install(item.type);
+          else this.cargo.push({ ...item, attachment: this.rand(0, Math.PI * 2) });
           this.collected++;
           this.emit('collect', { value: item.value, itemType: item.type });
         }
       }
       if (this.cargo.length >= 42 && this.sucking && this.fullNotice <= 0) { this.emit('full'); this.fullNotice = 5; }
+      this.updateEquipment(dt);
+      if (this.state !== 'playing') return;
 
       for (const bomb of this.bombs) {
         if (bomb.dead) continue;
@@ -296,6 +403,7 @@
           if (!hit) this.makeItem(shot.type, clamp(shot.x, 45, this.width - 45), clamp(shot.y, 55, this.height - 45), { cooldown: .7 });
           else this.effect(shot.x, shot.y, shot.color, 4);
         }
+        if (this.state !== 'playing') return;
       }
       this.bombs = this.bombs.filter(b => !b.dead);
       for (let i = this.effects.length - 1; i >= 0; i--) {
@@ -313,7 +421,7 @@
     }
   }
 
-  const api = { Game, TYPES, clamp, distance };
+  const api = { Game, TYPES, MODULES, clamp, distance };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MagnetCore = api;
 })(typeof window !== 'undefined' ? window : globalThis);

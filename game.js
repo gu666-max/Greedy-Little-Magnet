@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const { Game, clamp } = window.MagnetCore;
+  const { Game, MODULES, clamp } = window.MagnetCore;
   const $ = id => document.getElementById(id);
   const canvas = $('game-canvas'), ctx = canvas.getContext('2d');
   const dom = Object.fromEntries(['score','timer','cargo','best-score','load-label','load-bar','load-note','hearts','pause-button','start-overlay','pause-overlay','result-overlay','help-overlay','event-toast'].map(id => [id, $(id)]));
@@ -8,7 +8,9 @@
     get(key, fallback) { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } },
     set(key, value) { try { localStorage.setItem(key, String(value)); } catch { /* Private/file browsing can deny storage; the game still works. */ } }
   };
-  let best = Math.max(0, Number(storage.get('greedy-magnet-best-v1', '0')) || 0);
+  let selectedMode = storage.get('greedy-magnet-mode-v1', 'assembly') === 'classic' ? 'classic' : 'assembly';
+  const bestKey = () => game.mode === 'assembly' ? 'greedy-magnet-best-assembly-v1' : 'greedy-magnet-best-v1';
+  let best = 0;
   let sound = storage.get('greedy-magnet-sound-v1', 'on') === 'on';
   let audioContext, lastCollectSound = 0;
   let visualTime = 0, lastFrame = 0, hudClock = 0, toastDeadline = 0;
@@ -35,7 +37,16 @@
   }
   function onEvent(event) {
     switch (event.type) {
-      case 'start': tone(440, .12); tone(660, .15, .035, .09); toast('开工！把宝贝送回左下角绿色回收站', 3.5); break;
+      case 'start': tone(440, .12); tone(660, .15, .035, .09); toast(event.mode === 'assembly' ? '先吸发光部件！组装能力后再去拆木箱' : '开工！把宝贝送回左下角绿色回收站', 3.5); break;
+      case 'install': {
+        const module = MODULES[event.moduleType];
+        tone(660, .12); tone(990, .17, .025, .1);
+        toast(`已组装${module.name}！${module.description}`, 3.2);
+        rings.push({ x: game.player.x, y: game.player.y, life: .6, color: module.color, radius: 28 }); break;
+      }
+      case 'duplicate': toast('这个部件装满了，换成一枚大金币！'); break;
+      case 'shield': toast('装甲挡住了爆炸！宝贝和生命都保住了'); tone(460, .15, .03); break;
+      case 'dash': tone(240, .18, .03, 0, 'triangle', 900); break;
       case 'collect':
         if (performance.now() - lastCollectSound > 65) { tone(event.itemType === 'gold' ? 1046 : 620 + game.cargo.length * 14, .065, .017); lastCollectSound = performance.now(); }
         break;
@@ -155,7 +166,13 @@
   function drawItem(item, carried = false) {
     ctx.save(); ctx.translate(item.x, item.y); ctx.rotate(item.angle);
     if (!carried) ellipse(2, 5, item.radius * .9, item.radius * .43, '#53644717');
-    if (item.type === 'coin' || item.type === 'gold') {
+    if (item.module) {
+      ctx.rotate(-item.angle);
+      const module = MODULES[item.type];
+      ellipse(0, 0, 24 + Math.sin(visualTime * 3) * 2, 24 + Math.sin(visualTime * 3) * 2, module.color + '24');
+      ctx.beginPath(); ctx.arc(0, 0, 25, 0, Math.PI * 2); ctx.strokeStyle = module.color + '99'; ctx.lineWidth = 1.5; ctx.stroke();
+      drawModule(item.type, 0, 0, .8, visualTime);
+    } else if (item.type === 'coin' || item.type === 'gold') {
       const r = item.radius;
       ellipse(0, 2, r, r * .83, '#bf9648'); ellipse(0, 0, r, r * .83, '#e8c568');
       ctx.beginPath(); ctx.ellipse(0, 0, r - 3, (r - 3) * .82, 0, 0, Math.PI * 2); ctx.strokeStyle = '#f7df94'; ctx.lineWidth = 1.5; ctx.stroke();
@@ -174,6 +191,47 @@
       rounded(-7, -11, 14, 7, 2, '#bbc6bb', '#8b9e94'); line(-4, -8, 4, -8, '#82978e', 1.5);
     }
     ctx.restore();
+  }
+  function drawModule(type, x, y, scale = 1, t = 0) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
+    if (type === 'saw') {
+      ctx.rotate(t * 5); ctx.beginPath();
+      for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2, r = i % 2 ? 14 : 22; if (!i) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r); else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+      ctx.closePath(); ctx.fillStyle = '#8aaeb9'; ctx.fill(); ctx.strokeStyle = '#587f8c'; ctx.lineWidth = 1.5; ctx.stroke(); ellipse(0, 0, 9, 9, '#d6c28e'); ellipse(0, 0, 4, 4, '#657c7c');
+    } else if (type === 'armor') {
+      ctx.beginPath(); ctx.moveTo(-18,-18); ctx.lineTo(18,-18); ctx.lineTo(16,4); ctx.quadraticCurveTo(0,25,-16,4); ctx.closePath(); ctx.fillStyle = '#9fbb8e'; ctx.fill(); ctx.strokeStyle = '#62856b'; ctx.lineWidth = 2; ctx.stroke();
+      line(-10,-12,10,-12,'#d4ddad',2); line(0,-9,0,11,'#719478',3); ellipse(-12,-13,2,2,'#617e6b'); ellipse(12,-13,2,2,'#617e6b');
+    } else if (type === 'spring') {
+      rounded(-20, -16, 9, 32, 3, '#a190b4'); rounded(11,-16,9,32,3,'#a190b4');
+      ctx.beginPath(); ctx.moveTo(-13,0); for (let i=0;i<6;i++) ctx.lineTo(-10+i*4,i%2?-10:10); ctx.lineTo(14,0); ctx.strokeStyle = '#78658e'; ctx.lineWidth = 3; ctx.stroke();
+      line(-19,-12,-14,-12,'#d8cbe6',2); line(13,-12,18,-12,'#d8cbe6',2);
+    } else {
+      ellipse(1,3,27,27,'#61716d'); ellipse(-2,-1,24,24,'#889a91'); ellipse(-8,-10,8,5,'#b2bbaa');
+      ctx.beginPath(); ctx.arc(-1,0,18,-.4,2); ctx.strokeStyle = '#738780'; ctx.lineWidth = 2; ctx.stroke();
+      for (const [px,py] of [[-12,9],[11,10],[9,-12]]) ellipse(px,py,3,3,'#546e62');
+    }
+    ctx.restore();
+  }
+  function drawEquipment(t) {
+    const p = game.player;
+    if (game.ball) {
+      line(p.x, p.y, game.ball.x, game.ball.y, '#536f6280', 4);
+      const length = Math.hypot(game.ball.x-p.x,game.ball.y-p.y);
+      for (let i=15;i<length;i+=14) { const ratio=i/length; ellipse(p.x+(game.ball.x-p.x)*ratio,p.y+(game.ball.y-p.y)*ratio,3,3,'#a7b49e'); }
+      ellipse(game.ball.x+4,game.ball.y+18,30,12,'#486a4a25'); drawModule('ball', game.ball.x, game.ball.y, 1, t);
+    }
+    if (game.equipment.armor) {
+      ctx.beginPath(); ctx.arc(p.x,p.y,game.radius+15,0,Math.PI*2); ctx.strokeStyle='#8fae8660'; ctx.lineWidth=7; ctx.stroke();
+      for (let i=0;i<game.equipment.armor;i++) { const a=-Math.PI/2+i*2.1; drawModule('armor',p.x+Math.cos(a)*(game.radius+9),p.y+Math.sin(a)*(game.radius+9),.6,t); }
+    }
+    if (game.equipment.spring) drawModule('spring',p.x,p.y+35,.7,t);
+    for (let i=0;i<game.equipment.saw;i++) {
+      const a=game.elapsed*3.5+i*Math.PI;
+      drawModule('saw',p.x+Math.cos(a)*(game.radius+25),p.y+Math.sin(a)*(game.radius+25),1,t);
+    }
+    if (game.dashTime > 0) {
+      for (let i=1;i<=3;i++) { ctx.globalAlpha=.2/i; ellipse(p.x-game.dashDirection.x*i*22,p.y-game.dashDirection.y*i*22,24,24,'#a597c9'); } ctx.globalAlpha=1;
+    }
   }
   function drawBomb(bomb, t) {
     ctx.save(); ctx.translate(bomb.x, bomb.y); ctx.rotate(bomb.angle);
@@ -242,6 +300,7 @@
     drawBase(t);
     for (const item of game.items) {
       drawItem(item);
+      if (item.module) label(MODULES[item.type].name, item.x, item.y + 35, 10, MODULES[item.type].color, 'center', 800);
       if (item.type === 'gold' && Math.sin(t * 2 + item.id) > .85) { line(item.x + 19, item.y - 15, item.x + 19, item.y - 6, '#ecd38b', 1.5); line(item.x + 14, item.y - 10.5, item.x + 24, item.y - 10.5, '#ecd38b', 1.5); }
     }
     for (const o of game.obstacles) drawObstacle(o);
@@ -249,7 +308,7 @@
     for (const shot of game.projectiles) {
       line(shot.x - shot.vx * .023, shot.y - shot.vy * .023, shot.x, shot.y, '#f6edc2a0', 4); drawItem(shot);
     }
-    drawMagnet(t);
+    drawEquipment(t); drawMagnet(t);
     for (const ring of rings) {
       ctx.globalAlpha = ring.life * 1.2; ctx.beginPath(); ctx.arc(ring.x, ring.y, ring.radius + (1 - ring.life) * 50, 0, Math.PI * 2); ctx.strokeStyle = ring.color; ctx.lineWidth = 3; ctx.stroke();
     }
@@ -273,10 +332,39 @@
     dom.hearts.innerHTML = Array.from({length:3}, (_, i) => `<span${i >= game.health ? ' class="lost"' : ''}>♥</span>`).join(' ');
     dom.hearts.setAttribute('aria-label', `${game.health}格生命`);
     dom['pause-button'].disabled = game.state !== 'playing' && game.state !== 'paused';
+    const assembly = game.mode === 'assembly';
+    $('assembly-strip').classList.toggle('hidden', !assembly);
+    if (assembly) {
+      for (const [type, module] of Object.entries(MODULES)) {
+        const count = game.equipment[type], slot = $(`slot-${type}`);
+        slot.classList.toggle('installed', count > 0);
+        slot.querySelector('small').textContent = count ? type === 'armor' ? `可挡 ${count} 次爆炸` : type === 'saw' ? `${count} 片 · 自动切箱` : type === 'ball' ? '拖动撞击 · +18 重量' : '冲刺已解锁' : '未组装';
+      }
+      $('dash-button').disabled = !game.equipment.spring || game.dashCooldown > 0 || game.state !== 'playing';
+      $('dash-button').innerHTML = game.dashCooldown > 0 ? `冷却 ${game.dashCooldown.toFixed(1)} 秒` : `弹簧冲刺 <kbd>Q</kbd>`;
+      $('touch-dash').disabled = $('dash-button').disabled;
+      $('touch-dash').textContent = game.dashCooldown > 0 ? `${game.dashCooldown.toFixed(1)}s` : game.equipment.spring ? 'ϟ 冲刺' : 'ϟ 找弹簧';
+      $('mission-list').innerHTML = game.objectives.map(goal => `<span class="${goal.current >= goal.target ? 'done' : ''}">${goal.current >= goal.target ? '✓' : '○'} ${goal.label} <b>${Math.min(goal.current,goal.target)}/${goal.target}</b></span>`).join('');
+    }
+    $('touch-dash').classList.toggle('hidden',!assembly);
   }
   function hideOverlays() { for (const key of ['start-overlay','pause-overlay','result-overlay','help-overlay']) dom[key].classList.add('hidden'); }
   function clearInput() { keys.clear(); holds.clear(); mainPointer = null; $('touch-magnet').textContent = '按住吸取'; game.sucking = false; game.target = { x: game.player.x, y: game.player.y }; }
-  function startGame() { unlockAudio(); clearInput(); texts.length = rings.length = 0; hideOverlays(); game.start(); updateHud(); canvas.focus({preventScroll:true}); }
+  function startGame() { unlockAudio(); clearInput(); texts.length = rings.length = 0; hideOverlays(); game.start(selectedMode); ground = null; updateHud(); canvas.focus({preventScroll:true}); }
+  function selectMode(mode) {
+    if (game.state !== 'ready') return;
+    selectedMode = mode; game.mode = mode; game.reset(); ground = null;
+    storage.set('greedy-magnet-mode-v1', mode);
+    const assembly = mode === 'assembly';
+    for (const option of ['assembly','classic']) { $(`mode-${option}`).classList.toggle('active',option===mode); $(`mode-${option}`).setAttribute('aria-pressed',String(option===mode)); }
+    $('mode-edition').textContent = assembly ? '组装挑战 · 90 秒' : '经典回收 · 60 秒';
+    $('field-mode').textContent = assembly ? 'ASSEMBLY / 01' : 'SCRAPYARD / 01';
+    $('start-title').innerHTML = assembly ? '吸成一台战车。<br>还能开得回来吗？' : '宝贝都归你。<br>前提是，带得回来。';
+    $('start-description').innerHTML = assembly ? '吸锯片、装甲、弹簧和铁球，边捡边组装。<br>完成三项挑战，再把宝贝送回回收站！' : '吸走零件和金币，送回绿色回收站。<br>贪得越多，身体越笨重。小心炸弹也会被吸来！';
+    $('start-duration').textContent = assembly ? '90 秒一局' : '60 秒一局';
+    best = Math.max(0,Number(storage.get(bestKey(),'0')) || 0); dom['best-score'].textContent=best.toLocaleString('zh-CN');
+    updateHud();
+  }
   function pauseGame() {
     if (game.state === 'playing') { game.pause(); clearInput(); dom['pause-overlay'].classList.remove('hidden'); updateHud(); }
   }
@@ -284,12 +372,16 @@
   function showResult(result) {
     clearInput();
     const newBest = result.score > best;
-    if (newBest) { best = result.score; storage.set('greedy-magnet-best-v1', best); dom['best-score'].textContent = best.toLocaleString('zh-CN'); }
+    if (newBest) { best = result.score; storage.set(bestKey(), best); dom['best-score'].textContent = best.toLocaleString('zh-CN'); }
     $('result-kicker').textContent = newBest ? 'NEW PERSONAL BEST · 新纪录' : '今日收工 · SHIFT COMPLETE';
     $('result-title').textContent = result.reason === 'health' ? '贪心，也要有分寸。' : result.score >= 2500 ? '废品场大富翁！' : result.score > 0 ? '这一袋，值了！' : '宝贝要送回来才算哦。';
     $('result-score').textContent = result.score.toLocaleString('zh-CN');
     $('result-banks').textContent = result.banks; $('result-items').textContent = result.items; $('result-lost').textContent = result.lost;
     $('result-comment').textContent = result.lost > 0 ? `还有 ${result.lost} 分没来得及回收。下次早点回来！` : result.reason === 'health' ? '远远甩出零件，可以提前引爆炸弹。' : '这次存得很及时。下一把，再多吸一点？';
+    if (result.mode === 'assembly') {
+      $('result-title').textContent = result.goals === 3 ? '战车大师，挑战全达成！' : result.reason === 'health' ? '这台战车，下次再升级。' : '废品战车，收工！';
+      $('result-comment').textContent = `挑战完成 ${result.goals}/3 · 拆箱 ${game.cratesBroken} 个 · 组装 ${game.installedKinds.size} 种。${result.lost ? `还有 ${result.lost} 分没回收。` : '继续尝试不同组合吧！'}`;
+    }
     hideOverlays(); dom['result-overlay'].classList.remove('hidden'); updateHud(); $('again-button').focus({preventScroll:true});
     tone(523, .2, .025); tone(newBest ? 1046 : 784, .3, .03, .17);
   }
@@ -325,6 +417,7 @@
       return;
     }
     if (game.state !== 'playing' || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (['KeyQ','ShiftLeft','ShiftRight'].includes(event.code)) { event.preventDefault(); if (!event.repeat) game.dash(keyboardInput()); return; }
     if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(event.code)) {
       event.preventDefault(); keys.add(event.code); if (event.code === 'Space' && !event.repeat) { unlockAudio(); setHold('space', true); }
     }
@@ -332,7 +425,7 @@
   window.addEventListener('keyup', event => { keys.delete(event.code); if (event.code === 'Space') { if (game.state === 'playing') event.preventDefault(); setHold('space', false); } });
   document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
   window.addEventListener('blur', pauseGame);
-  function openHelp() { helpWasPlaying = game.state === 'playing'; if (helpWasPlaying) { game.pause(); clearInput(); } dom['help-overlay'].classList.remove('hidden'); $('close-help-button').focus({preventScroll:true}); updateHud(); }
+  function openHelp() { helpWasPlaying = game.state === 'playing'; if (helpWasPlaying) { game.pause(); clearInput(); } $('assembly-help').classList.toggle('hidden',game.mode!=='assembly'); dom['help-overlay'].classList.remove('hidden'); $('close-help-button').focus({preventScroll:true}); updateHud(); }
   function closeHelp() { dom['help-overlay'].classList.add('hidden'); if (helpWasPlaying) { game.resume(); canvas.focus({preventScroll:true}); } helpWasPlaying = false; updateHud(); }
   $('start-button').addEventListener('click', startGame); $('again-button').addEventListener('click', startGame); $('restart-button').addEventListener('click', startGame);
   $('resume-button').addEventListener('click', resumeGame);
@@ -340,6 +433,10 @@
   $('home-button').addEventListener('click', () => { hideOverlays(); game.home(); dom['start-overlay'].classList.remove('hidden'); texts.length = rings.length = 0; updateHud(); });
   $('sound-button').addEventListener('click', () => { sound = !sound; storage.set('greedy-magnet-sound-v1', sound ? 'on' : 'off'); updateSoundButton(); if (sound) { unlockAudio(); tone(659, .08); } });
   $('help-button').addEventListener('click', openHelp); $('close-help-button').addEventListener('click', closeHelp);
+  $('mode-assembly').addEventListener('click', () => selectMode('assembly')); $('mode-classic').addEventListener('click', () => selectMode('classic'));
+  $('dash-button').addEventListener('click', () => { unlockAudio(); game.dash(keyboardInput()); canvas.focus({preventScroll:true}); });
+  $('touch-dash').addEventListener('click', () => { unlockAudio(); game.dash(keyboardInput()); });
+  function keyboardInput() { return { x: Number(keys.has('KeyD') || keys.has('ArrowRight')) - Number(keys.has('KeyA') || keys.has('ArrowLeft')), y: Number(keys.has('KeyS') || keys.has('ArrowDown')) - Number(keys.has('KeyW') || keys.has('ArrowUp')) }; }
   function resize() {
     const mobile = matchMedia('(max-width:600px)').matches;
     const rect = canvas.getBoundingClientRect();
@@ -354,10 +451,7 @@
   function frame(now) {
     const dt = Math.min(.05, Math.max(0, (now - (lastFrame || now)) / 1000)); lastFrame = now;
     if (game.state !== 'paused') visualTime += dt;
-    game.step(dt, {
-      x: Number(keys.has('KeyD') || keys.has('ArrowRight')) - Number(keys.has('KeyA') || keys.has('ArrowLeft')),
-      y: Number(keys.has('KeyS') || keys.has('ArrowDown')) - Number(keys.has('KeyW') || keys.has('ArrowUp'))
-    });
+    game.step(dt, keyboardInput());
     if (game.state === 'playing') {
       for (let i = texts.length - 1; i >= 0; i--) { texts[i].life -= dt; texts[i].y -= dt * 27; if (texts[i].life <= 0) texts.splice(i, 1); }
       for (let i = rings.length - 1; i >= 0; i--) { rings[i].life -= dt; if (rings[i].life <= 0) rings.splice(i, 1); }
@@ -367,5 +461,6 @@
     if (toastDeadline && now > toastDeadline) { dom['event-toast'].classList.remove('visible'); toastDeadline = 0; }
     requestAnimationFrame(frame);
   }
-  updateSoundButton(); resize(); updateHud(); requestAnimationFrame(frame);
+  const assemblyHelp = document.createElement('p'); assemblyHelp.id='assembly-help'; assemblyHelp.textContent='战车部件自动安装，回收和甩出不会卸掉：锯片切箱、装甲挡一次爆炸、铁球拖行撞击；弹簧用 Q / Shift 或冲刺按钮发动，冷却 5 秒。装备也增加负重。本局完成三项目标获得满挑战评价。'; $('close-help-button').before(assemblyHelp);
+  updateSoundButton(); selectMode(selectedMode); resize(); updateHud(); requestAnimationFrame(frame);
 })();

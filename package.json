@@ -1,8 +1,8 @@
 {
   "name": "greedy-magnet",
-  "version": "1.0.0",
+  "version": "1.1.0-beta.1",
   "private": true,
-  "description": "贪心小磁铁：可离线游玩的60秒浏览器小游戏",
+  "description": "贪心小磁铁：经典回收与废品战车组装挑战",
   "scripts": {
     "start": "node server.cjs",
     "test": "node --test tests/game-core.test.cjs"
