@@ -50,6 +50,7 @@ async function run() {
     const startBox = await page.locator('#start-button').boundingBox(); assert.ok(startBox.y + startBox.height < 1000);
     checks.push('桌面首页、开始按钮和无横向溢出');
 
+    await page.click('#mode-assembly');
     await page.click('#help-button'); assert.ok(await page.locator('#help-overlay').isVisible()); await page.click('#close-help-button');
     assert.equal(await page.evaluate(() => testGame.state), 'ready');
     assert.equal(await page.evaluate(() => testGame.mode),'assembly');
@@ -122,6 +123,7 @@ async function run() {
     const mobile = await mobileContext.newPage(); mobile.on('pageerror', error => errors.push(error.message)); await instrument(mobile); await mobile.goto(baseURL);
     await mobile.screenshot({ path: path.join(screenshots, 'mobile-start.png'), fullPage: true });
     assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await mobile.tap('#mode-assembly');
     await mobile.tap('#start-button'); assert.equal(await mobile.evaluate(() => testGame.width), 760); assert.equal(await mobile.evaluate(() => testGame.height), 950);
     const mp = await mobile.evaluate(() => ({ x: testGame.player.x, y: testGame.player.y })); const mpos = await point(mobile, mp.x, mp.y);
     const cdp = await mobileContext.newCDPSession(mobile);
@@ -140,6 +142,111 @@ async function run() {
     await mobile.tap('#help-button'); assert.equal(await mobile.evaluate(() => testGame.state), 'paused'); await mobile.tap('#close-help-button'); assert.equal(await mobile.evaluate(() => testGame.state), 'playing');
     await mobile.evaluate(() => { testGame.health = 1; testGame.invincible = 0; testGame.equipment.armor=0; testGame.explode({ ...testGame.player, dead: false }); });
     await mobile.waitForSelector('#result-overlay:not(.hidden)'); await mobile.tap('#home-button'); assert.ok(await mobile.locator('#start-overlay').isVisible()); checks.push('手机帮助暂停恢复、生命结算与返回首页');
+
+    const modesContext = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+    const modePage = await modesContext.newPage(); modePage.on('pageerror', error => errors.push(error.message)); await instrument(modePage); await modePage.goto(baseURL);
+    assert.equal(await modePage.evaluate(() => testGame.mode), 'campaign');
+    assert.equal(await modePage.locator('[data-level="1"]').isDisabled(), true);
+    assert.equal(await modePage.locator('[data-level="2"]').isDisabled(), true);
+    await modePage.locator('[data-level="1"]').dispatchEvent('click');
+    assert.equal(await modePage.evaluate(() => testGame.levelIndex), 0);
+    const campaignStart = await modePage.locator('#start-button').boundingBox();
+    const campaignPanel = await modePage.locator('.start-panel').boundingBox();
+    assert.ok(campaignStart.y + campaignStart.height <= campaignPanel.y + campaignPanel.height, '闯关开始按钮首次显示完整');
+    await modePage.screenshot({path:path.join(screenshots,'modes-campaign-menu.png'),fullPage:true});
+    await modePage.click('#start-button');
+    assert.equal(await modePage.evaluate(() => testGame.duration), 90);
+    await modePage.waitForFunction(() => document.querySelector('#mode-progress').textContent.includes('回收 600 分'));
+    await modePage.evaluate(() => { testGame.elapsed = 89.99; testGame.bombs = []; });
+    await modePage.waitForSelector('#result-overlay:not(.hidden)');
+    assert.ok((await modePage.locator('#result-title').innerText()).includes('任务还差一点'));
+    assert.ok(await modePage.locator('#next-level-button').isHidden());
+    await modePage.click('#home-button'); assert.ok(await modePage.locator('[data-level="1"]').isDisabled());
+    checks.push('闯关默认入口、锁定关不可选、时间失败不解锁');
+
+    await modePage.click('#start-button');
+    const finishLevel = async () => {
+      await modePage.evaluate(() => {
+        testGame.bombs = []; testGame.invincible = 100;
+        for (const goal of testGame.level.goals) {
+          if (goal.stat === 'installedKinds') for (const type of ['saw', 'spring', 'ram']) testGame.install(type);
+          else testGame[goal.stat] = goal.target;
+        }
+      });
+      await modePage.waitForSelector('#result-overlay:not(.hidden)');
+    };
+    await finishLevel();
+    assert.equal(await modePage.evaluate(() => localStorage.getItem('greedy-magnet-campaign-cleared-v1')), '1');
+    assert.ok(await modePage.locator('#next-level-button').isVisible());
+    await modePage.screenshot({path:path.join(screenshots,'campaign-cleared.png'),fullPage:true});
+    const map1 = await modePage.evaluate(() => JSON.stringify(testGame.level.layout));
+    await modePage.click('#next-level-button');
+    assert.equal(await modePage.evaluate(() => testGame.levelIndex), 1);
+    assert.notEqual(await modePage.evaluate(() => JSON.stringify(testGame.level.layout)), map1);
+    assert.equal(await modePage.evaluate(() => testGame.score), 0);
+    await modePage.waitForFunction(() => document.querySelector('#mode-progress').textContent.includes('拆掉 3 个木箱'));
+    await modePage.screenshot({path:path.join(screenshots,'campaign-map-2.png'),fullPage:true});
+    checks.push('完成任务立即通关、下一关地图和目标切换、成绩与装备清空');
+
+    await modePage.evaluate(() => { testGame.health = 1; testGame.equipment.armor = 0; testGame.invincible = 0; testGame.explode({ ...testGame.player, dead: false }); });
+    await modePage.waitForSelector('#result-overlay:not(.hidden)'); assert.ok(await modePage.locator('#next-level-button').isHidden());
+    await modePage.click('#again-button'); assert.equal(await modePage.evaluate(() => testGame.levelIndex), 1); assert.equal(await modePage.evaluate(() => testGame.health), 3);
+    await finishLevel(); await modePage.click('#next-level-button'); assert.equal(await modePage.evaluate(() => testGame.levelIndex), 2);
+    await finishLevel(); assert.ok((await modePage.locator('#result-title').innerText()).includes('三关全通')); assert.ok(await modePage.locator('#next-level-button').isHidden());
+    await modePage.click('#home-button'); await modePage.reload();
+    assert.equal(await modePage.evaluate(() => testGame.levelIndex), 2); assert.equal(await modePage.locator('[data-level="2"]').isDisabled(), false);
+    await modePage.click('[data-level="0"]'); assert.equal(await modePage.evaluate(() => testGame.levelIndex), 0);
+    assert.equal(Number((await modePage.locator('#best-score').innerText()).replaceAll(',', '')), 600);
+    checks.push('生命失败重试原关、最后关结算、刷新保存解锁、旧关可重玩与分关成绩');
+
+    await modePage.click('#mode-survival'); assert.equal(await modePage.locator('#timer').innerText(), '00:00');
+    assert.equal(await modePage.locator('#timer-label').innerText(), '存活时间');
+    assert.equal(await modePage.locator('#best-score').innerText(), '0');
+    await modePage.click('#start-button');
+    await modePage.evaluate(() => { testGame.elapsed = 120; testGame.bombs = []; testGame.invincible = 100; });
+    await modePage.waitForFunction(() => document.querySelector('#mode-progress').textContent.includes('危险阶段 5'));
+    assert.equal(await modePage.evaluate(() => testGame.state), 'playing');
+    assert.equal(await modePage.locator('#timer').innerText(), '02:00');
+    assert.ok(!(await modePage.locator('#timer').innerText()).includes('NaN'));
+    await modePage.click('#pause-button'); const elapsed = await modePage.evaluate(() => testGame.elapsed); await modePage.waitForTimeout(250);
+    assert.equal(await modePage.evaluate(() => testGame.elapsed), elapsed); await modePage.click('#resume-button');
+    await modePage.screenshot({path:path.join(screenshots,'survival-playing.png'),fullPage:true});
+    await modePage.evaluate(() => { testGame.score = 987; testGame.health = 1; testGame.equipment.armor = 0; testGame.invincible = 0; testGame.explode({ ...testGame.player, dead: false }); });
+    await modePage.waitForSelector('#result-overlay:not(.hidden)');
+    assert.ok((await modePage.locator('#result-title').innerText()).includes('02:00'));
+    assert.ok(await modePage.evaluate(() => Number(localStorage.getItem('greedy-magnet-survival-time-v1')) >= 120));
+    assert.equal(await modePage.evaluate(() => localStorage.getItem('greedy-magnet-best-survival-v1')), '987');
+    await modePage.screenshot({path:path.join(screenshots,'survival-result.png'),fullPage:true});
+    await modePage.click('#again-button'); assert.ok(await modePage.evaluate(() => testGame.elapsed < 1)); assert.equal(await modePage.evaluate(() => testGame.score), 0);
+    checks.push('生存跨越90秒、存活计时与升难、暂停冻结、生命结算与独立时间/分数纪录');
+
+    await modePage.click('#pause-button'); await modePage.click('#pause-home-button');
+    assert.equal(await modePage.evaluate(() => testGame.state), 'ready'); assert.ok(await modePage.locator('#start-overlay').isVisible());
+    assert.equal(await modePage.evaluate(() => localStorage.getItem('greedy-magnet-best-survival-v1')), '987');
+    checks.push('生存暂停菜单放弃本局返回模式选择，已有纪录保留');
+
+    await modePage.reload(); assert.equal(await modePage.evaluate(() => testGame.mode), 'survival');
+    assert.equal(await modePage.locator('#best-score').innerText(), '987');
+    await modePage.click('#mode-classic'); assert.equal(await modePage.locator('#best-score').innerText(), '0'); assert.equal(await modePage.locator('#timer').innerText(), '01:00');
+    await modePage.click('#mode-assembly'); assert.equal(await modePage.locator('#best-score').innerText(), '0');
+    checks.push('模式选择记忆、三模式和附加玩法的纪录互不覆盖');
+
+    await mobile.tap('#mode-survival'); await mobile.tap('#start-button');
+    await mobile.evaluate(() => { testGame.elapsed = 91; testGame.bombs = []; testGame.equipment.spring = 1; testGame.invincible = 100; });
+    await mobile.waitForFunction(() => !document.querySelector('#touch-dash').disabled);
+    await mobile.tap('#touch-dash'); assert.ok(await mobile.evaluate(() => testGame.dashCooldown > 0));
+    await mobile.screenshot({path:path.join(screenshots,'mobile-survival.png'),fullPage:true});
+    await mobile.evaluate(() => { testGame.health = 1; testGame.invincible = 0; testGame.equipment.armor = 0; testGame.explode({ ...testGame.player, dead: false }); });
+    await mobile.waitForSelector('#result-overlay:not(.hidden)'); await mobile.tap('#home-button'); await mobile.tap('#mode-campaign');
+    await mobile.tap('#start-button'); await mobile.evaluate(() => { testGame.score = 600; testGame.banks = 2; testGame.bombs = []; testGame.invincible = 100; });
+    await mobile.waitForSelector('#result-overlay:not(.hidden)'); await mobile.tap('#next-level-button'); assert.equal(await mobile.evaluate(() => testGame.levelIndex), 1);
+    assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    checks.push('手机生存冲刺、闯关成功下一关与无横向溢出');
+
+    const restrictedContext = await browser.newContext(); const restricted = await restrictedContext.newPage(); restricted.on('pageerror', error => errors.push(error.message)); await instrument(restricted);
+    await restricted.addInitScript(() => { Storage.prototype.getItem = () => { throw new Error('Storage denied'); }; Storage.prototype.setItem = () => { throw new Error('Storage denied'); }; });
+    await restricted.goto(baseURL); await restricted.click('#mode-survival'); await restricted.click('#start-button'); assert.equal(await restricted.evaluate(() => testGame.state), 'playing');
+    checks.push('禁用本机存储时仍可选择模式和游玩');
 
     const offline = await context.newPage(); offline.on('pageerror', error => errors.push(error.message));
     await offline.goto('file://' + path.resolve(__dirname, '../index.html').replaceAll('\\', '/'));

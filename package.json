@@ -1,8 +1,8 @@
 {
   "name": "greedy-magnet",
-  "version": "1.1.0-beta.2-local",
+  "version": "1.2.0-beta.1-local",
   "private": true,
-  "description": "贪心小磁铁：经典回收与废品战车组装挑战",
+  "description": "贪心小磁铁：三地图闯关、60秒限时挑战与无限生存",
   "scripts": {
     "start": "node server.cjs",
     "test": "node --test tests/game-core.test.cjs"

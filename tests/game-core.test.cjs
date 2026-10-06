@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { Game, TYPES } = require('../game-core.js');
+const { Game, TYPES, LEVELS } = require('../game-core.js');
 
 function setup() {
   let seed = 1789;
@@ -12,6 +12,90 @@ function setup() {
 }
 function tick(game, seconds, input) { for (let i = 0; i < Math.round(seconds * 60); i++) game.step(1 / 60, input); }
 function cargo(game, types) { for (const type of types) game.cargo.push({ type, ...TYPES[type], attachment: 0, angle: 0 }); }
+
+test('三张闯关地图的布局与任务不同，关卡索引有边界保护', () => {
+  const { game } = setup(); const layouts = [];
+  for (let i = 0; i < LEVELS.length; i++) {
+    game.start('campaign', i); layouts.push(JSON.stringify(game.obstacles));
+    assert.equal(game.duration, LEVELS[i].duration);
+    assert.ok(game.objectives.length >= 2); assert.ok(game.items.some(item => item.module));
+    assert.ok(game.obstacles.filter(o => o.kind === 'crate').length >= (LEVELS[i].goals.find(g => g.stat === 'cratesBroken')?.target || 0));
+  }
+  assert.equal(new Set(layouts).size, 3);
+  game.start('campaign', 999); assert.equal(game.levelIndex, 2);
+  game.start('campaign', NaN); assert.equal(game.levelIndex, 0);
+});
+
+test('闯关只计算已回收成绩，全部目标达成立即通关且只结算一次', () => {
+  const { game, events } = setup(); game.start('campaign', 0); game.bombs = [];
+  cargo(game, Array(10).fill('coin')); game.banks = 1;
+  game.step(.01); assert.equal(game.state, 'playing'); assert.equal(game.score, 0);
+  game.player.x = game.base.x + 120; game.player.y = game.base.y + 100; game.target = { ...game.player };
+  game.step(.01); assert.equal(game.state, 'ended');
+  assert.equal(game.score, 600); assert.equal(game.banks, 2);
+  assert.equal(events.at(-1).reason, 'complete'); assert.equal(events.at(-1).level, 0);
+  tick(game, 1); assert.equal(events.filter(e => e.type === 'end').length, 1);
+});
+
+test('闯关时间与生命失败不冒充通关，重试清空任务', () => {
+  const { game, events } = setup(); game.start('campaign', 1); game.bombs = [];
+  game.score = 1200; game.cratesBroken = 2; game.elapsed = game.duration - .01;
+  game.step(.02); assert.equal(events.at(-1).reason, 'time');
+  game.start('campaign', 1); assert.equal(game.score, 0); assert.equal(game.cratesBroken, 0);
+  game.health = 1; game.invincible = 0; game.equipment.armor = 0;
+  game.explode({ ...game.player, dead: false }); assert.equal(events.at(-1).reason, 'health');
+});
+
+test('第二和第三关必须完成拆箱与组装目标，最后一关正常完成', () => {
+  const { game, events } = setup();
+  for (const index of [1, 2]) {
+    game.start('campaign', index); game.bombs = []; game.score = LEVELS[index].goals[0].target;
+    game.step(.01); assert.equal(game.state, 'playing');
+    const needed = LEVELS[index].goals.find(g => g.stat === 'cratesBroken').target;
+    for (const box of [...game.obstacles].filter(o => o.kind === 'crate').slice(0, needed)) game.breakCrate(box);
+    if (index === 2) { game.step(.01); assert.equal(game.state, 'playing'); for (const type of ['saw', 'spring', 'ram']) game.install(type); }
+    game.step(.01); assert.equal(events.at(-1).reason, 'complete'); assert.equal(events.at(-1).level, index);
+  }
+});
+
+test('生存超过60和90秒继续运行，暂停冻结计时和难度，结束保留存活时间', () => {
+  const { game, events } = setup(); game.start('survival'); game.bombs = []; game.obstacles = [];
+  game.elapsed = 59.99; game.step(.02); assert.equal(game.state, 'playing');
+  game.elapsed = 90; game.step(.02); assert.equal(game.state, 'playing');
+  const before = game.elapsed; const stage = game.survivalStage; game.pause(); tick(game, 5);
+  assert.equal(game.elapsed, before); assert.equal(game.survivalStage, stage);
+  game.resume(); game.health = 1; game.invincible = 0; game.equipment.armor = 0;
+  game.explode({ ...game.player, dead: false });
+  assert.equal(game.state, 'ended'); assert.equal(events.at(-1).reason, 'health'); assert.equal(events.at(-1).elapsed, before);
+});
+
+test('生存炸弹生成逐步加快且有数量上限，阶段通知不重复，长期无时间结束', () => {
+  const { game, events } = setup(); game.start('survival'); game.bombs = []; game.obstacles = [];
+  const initial = { interval: game.bombInterval, limit: game.bombLimit };
+  game.elapsed = 120; game.step(.01);
+  assert.ok(game.bombInterval < initial.interval); assert.ok(game.bombLimit > initial.limit);
+  assert.equal(events.filter(e => e.type === 'stage').length, 1); game.step(.01); assert.equal(events.filter(e => e.type === 'stage').length, 1);
+  game.elapsed = 3600; game.step(.01); assert.equal(game.state, 'playing');
+  assert.equal(game.bombInterval, 1.5); assert.equal(game.bombLimit, 24);
+  game.bombs = Array.from({ length: 24 }, (_, id) => ({ id, x: 1100, y: 600, vx: 0, vy: 0, radius: 19, born: 1, fuse: -1 }));
+  game.bombClock = 10; game.step(.01); assert.equal(game.bombs.length, 24);
+});
+
+test('生存炸弹主动逼近，回收区不能无限避伤；其他模式仍保护回收区', () => {
+  const { game } = setup(); game.start('survival'); game.obstacles = [];
+  const bomb = { x: game.player.x + 280, y: game.player.y, vx: 0, vy: 0, radius: 19, born: 0, fuse: -1, dead: false };
+  game.bombs = [bomb]; tick(game, 1); assert.ok(bomb.x < game.player.x + 280);
+  game.player.x = game.base.x + 130; game.player.y = game.base.y + 100; game.invincible = 0;
+  game.explode({ ...game.player, dead: false }); assert.equal(game.health, 2);
+  game.start('campaign'); game.player.x = game.base.x + 130; game.player.y = game.base.y + 100;
+  game.explode({ ...game.player, dead: false }); assert.equal(game.health, 3);
+});
+
+test('模式切换和生存重开清空装备、时间与分数，经典仍为60秒', () => {
+  const { game } = setup(); game.start('survival'); game.install('ram'); game.elapsed = 300; game.score = 900;
+  game.start('survival'); assert.equal(game.elapsed, 0); assert.equal(game.score, 0); assert.equal(game.equipment.ram, 0);
+  game.start('classic'); assert.equal(game.time, 60); assert.equal(game.hasEquipment, false); assert.deepEqual(game.objectives, []);
+});
 
 test('吸取物品增加携带价值，入账前不增加分数，收集事件类型保持正确', () => {
   const { game, events } = setup();

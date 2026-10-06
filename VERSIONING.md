@@ -19,10 +19,19 @@
 | v1.0.0 | main | 首个稳定版，60 秒经典回收 |
 | v1.1.0-beta.1 | feature/assembly-playground | 组装能力体验版，90 秒废品战车 + 经典回收 |
 | v1.1.0-beta.2-local | local/ram-head-preview | 仅本地预览，前置撞击头替换拖行铁球，不上传 GitHub |
+| v1.2.0-beta.1-local | codex/game-modes | 三地图闯关、限时与生存；仅本地保存，不上传 GitHub |
 
 体验版在独立分支发布，首版主线和标签不变。[体验版下载](https://github.com/gu666-max/Greedy-Little-Magnet/releases/tag/v1.1.0-beta.1)。
 
-## 回退这次撞击头改动
+## 回退这次模式改动
+
+旧版本地分支 `local/ram-head-preview` 与标签 `v1.1.0-beta.2-local` 保留本轮前的撞击头版。在工作区干净时使用 `git switch "local/ram-head-preview"` 恢复旧版，用 `git switch "codex/game-modes"` 返回三模式版。
+
+无需修改当前目录，也可分别解压 `local-backups/Greedy-Little-Magnet-v1.1.0-beta.2-local.zip` 与 `local-backups/Greedy-Little-Magnet-v1.2.0-beta.1-local.zip`，双击各自的 `index.html` 试玩。ZIP 不含本机测试依赖。关卡进度使用独立存储键，旧版不会读取或覆盖关卡进度。
+
+本版仅本地提交、标签和 ZIP 保存，没有 push 或 GitHub Release。
+
+## 回退之前的撞击头改动
 
 旧版标签 `v1.1.0-beta.1` 和本地分支 `feature/assembly-playground` 都保留拖行铁球。确认工作区干净后，可用 `git switch "feature/assembly-playground"` 恢复旧版；再用 `git switch "local/ram-head-preview"` 切回撞击头。
 

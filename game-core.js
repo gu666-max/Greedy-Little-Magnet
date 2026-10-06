@@ -16,6 +16,11 @@
     gold: { value: 120, weight: 2, radius: 14, color: '#dfb14a' }
   };
   for (const [type, config] of Object.entries(MODULES)) TYPES[type] = { value: 0, weight: 0, radius: 19, color: config.color, module: true };
+  const LEVELS = [
+    { name: '初到回收场', duration: 90, colors: ['#eef0de', '#dddfca'], goals: [{ stat: 'score', target: 600, label: '回收 600 分' }, { stat: 'banks', target: 2, label: '回收 2 次' }], layout: [[.18,.26,'crate'],[.63,.25,'crate'],[.76,.67,'crate'],[.79,.38,'machine']] },
+    { name: '木箱仓库', duration: 105, colors: ['#f1e5ce', '#dfceb3'], goals: [{ stat: 'score', target: 1200, label: '回收 1200 分' }, { stat: 'cratesBroken', target: 3, label: '拆掉 3 个木箱' }], layout: [[.23,.19,'crate'],[.46,.23,'crate'],[.7,.19,'crate'],[.55,.51,'crate'],[.78,.68,'crate'],[.37,.77,'tires'],[.8,.4,'machine']] },
+    { name: '机械迷阵', duration: 120, colors: ['#e0e9e9', '#c6d6d6'], goals: [{ stat: 'score', target: 1800, label: '回收 1800 分' }, { stat: 'installedKinds', target: 3, label: '组装 3 种部件' }, { stat: 'cratesBroken', target: 4, label: '拆掉 4 个木箱' }], layout: [[.17,.17,'crate'],[.41,.18,'machine'],[.7,.15,'crate'],[.28,.38,'crate'],[.6,.4,'machine'],[.83,.39,'crate'],[.43,.7,'crate'],[.75,.73,'crate'],[.56,.79,'tires']] }
+  ];
 
   class Game {
     constructor(options = {}) {
@@ -26,6 +31,7 @@
       this.sequence = 0;
       this.state = 'ready';
       this.mode = 'classic';
+      this.levelIndex = 0;
       this.reset();
     }
     get cargoValue() { return this.cargo.reduce((sum, item) => sum + item.value, 0); }
@@ -33,11 +39,19 @@
     get radius() { return 25 + Math.sqrt(this.cargo.length) * 3.2; }
     get range() { return 180 + Math.min(90, this.weight * 1.5); }
     get load() { return clamp(this.weight / 60, 0, 1); }
+    get level() { return LEVELS[this.levelIndex]; }
+    get hasEquipment() { return this.mode !== 'classic'; }
+    get baseProtects() { return this.mode !== 'survival'; }
+    get survivalStage() { return 1 + Math.floor(this.elapsed / 30); }
+    get bombInterval() { return this.mode === 'survival' ? Math.max(1.5, 7 - (this.survivalStage - 1) * .65) : 8 - Math.min(3, this.elapsed / 15); }
+    get bombLimit() { return this.mode === 'survival' ? Math.min(24, 4 + this.survivalStage * 2) : 5 + Math.floor(this.elapsed / 25); }
     get ramHead() {
       if (!this.equipment.ram) return null;
       return { x: this.player.x + this.facing.x * (this.radius + 10), y: this.player.y + this.facing.y * (this.radius + 10), radius: 23 };
     }
     get objectives() {
+      if (this.mode === 'campaign') return this.level.goals.map(goal => ({ ...goal, current: goal.stat === 'installedKinds' ? this.installedKinds.size : this[goal.stat] }));
+      if (this.mode !== 'assembly') return [];
       return [
         { label: '组装 3 种部件', current: this.installedKinds.size, target: 3 },
         { label: '拆掉 3 个木箱', current: this.cratesBroken, target: 3 },
@@ -47,9 +61,10 @@
     rand(low, high) { return low + this.random() * (high - low); }
     emit(type, data = {}) { this.onEvent({ type, ...data }); }
     reset() {
-      this.duration = this.mode === 'assembly' ? 90 : 60;
+      this.duration = this.mode === 'survival' ? Infinity : this.mode === 'campaign' ? this.level.duration : this.mode === 'assembly' ? 90 : 60;
       this.time = this.duration;
       this.elapsed = 0;
+      this.lastSurvivalStage = 1;
       this.score = 0;
       this.health = 3;
       this.banks = 0;
@@ -86,19 +101,24 @@
         { x: this.width * .79, y: this.height * .38, w: 77, h: 54, kind: 'machine', hp: Infinity },
         { x: this.width * .34, y: this.height * .14, w: 65, h: 54, kind: 'tires', hp: Infinity }
       ];
+      if (this.mode === 'campaign') this.obstacles = this.level.layout.map(([x, y, kind]) => ({ x: this.width * x, y: this.height * y, w: kind === 'machine' ? 90 : 65, h: 56, kind, hp: kind === 'crate' ? 2 : Infinity }));
       for (let i = 0; i < 78; i++) this.spawnItem();
       // A small, reachable first reward teaches collection before danger appears.
       for (let i = 0; i < 7; i++) this.makeItem('coin', this.player.x + 50 + (i % 3) * 28, this.player.y - 50 + Math.floor(i / 3) * 30);
       for (let i = 0; i < 3; i++) this.spawnBomb();
-      if (this.mode === 'assembly') {
-        for (const [rx, ry] of [[.5, .34], [.57, .7], [.85, .17]]) this.obstacles.push({ x: this.width * rx, y: this.height * ry, w: 65, h: 56, kind: 'crate', hp: 2 });
+      if (this.hasEquipment) {
+        if (this.mode !== 'campaign') for (const [rx, ry] of [[.5, .34], [.57, .7], [.85, .17]]) this.obstacles.push({ x: this.width * rx, y: this.height * ry, w: 65, h: 56, kind: 'crate', hp: 2 });
         this.makeItem('saw', this.player.x + 65, this.player.y - 65);
         this.makeItem('spring', this.player.x - 85, this.player.y + 45);
         this.spawnModule('armor');
         this.makeItem('ram', this.player.x + 90, this.player.y + 40);
       }
     }
-    start(mode = this.mode) { this.mode = mode === 'assembly' ? 'assembly' : 'classic'; this.reset(); this.state = 'playing'; this.emit('start', { mode: this.mode }); }
+    start(mode = this.mode, levelIndex = this.levelIndex) {
+      this.mode = ['classic', 'assembly', 'campaign', 'survival'].includes(mode) ? mode : 'classic';
+      this.levelIndex = clamp(Number.isInteger(levelIndex) ? levelIndex : 0, 0, LEVELS.length - 1);
+      this.reset(); this.state = 'playing'; this.emit('start', { mode: this.mode, level: this.levelIndex });
+    }
     pause() { if (this.state === 'playing') { this.state = 'paused'; this.sucking = false; } }
     resume() { if (this.state === 'paused') this.state = 'playing'; }
     home() { this.state = 'ready'; this.reset(); }
@@ -137,11 +157,11 @@
       this.makeItem(type, p.x, p.y);
     }
     spawnModule(type) {
-      if (this.mode !== 'assembly') return;
+      if (!this.hasEquipment) return;
       const p = this.freePosition(25); this.makeItem(type, p.x, p.y);
     }
     install(type) {
-      if (this.mode !== 'assembly' || !MODULES[type]) return false;
+      if (!this.hasEquipment || !MODULES[type]) return false;
       const config = MODULES[type];
       if (this.equipment[type] >= config.cap) {
         this.makeItem('gold', this.player.x, this.player.y);
@@ -191,7 +211,7 @@
         }
       }
       this.moduleClock += dt;
-      if (this.mode === 'assembly' && this.moduleClock >= 12) {
+      if (this.hasEquipment && this.moduleClock >= 12) {
         this.moduleClock = 0;
         const available = Object.keys(MODULES).filter(type => this.equipment[type] < MODULES[type].cap && !this.items.some(item => item.type === type));
         if (available.length) this.spawnModule(available[Math.floor(this.random() * available.length)]);
@@ -248,7 +268,7 @@
       this.effect(bomb.x, bomb.y, '#e9c375', 12);
       this.shake = Math.max(this.shake, .24);
       this.emit('explosion', { x: bomb.x, y: bomb.y });
-      if (distance(this.player, bomb) < 90 + this.radius && this.invincible <= 0 && !this.inBase(this.player)) {
+      if (distance(this.player, bomb) < 90 + this.radius && this.invincible <= 0 && !(this.baseProtects && this.inBase(this.player))) {
         if (this.equipment.armor > 0) {
           this.equipment.armor--;
           this.invincible = 1.2;
@@ -277,7 +297,7 @@
       this.cratesBroken++;
       this.effect(obstacle.x + obstacle.w / 2, obstacle.y + obstacle.h / 2, '#bd9367', 18);
       for (let j = 0; j < 7; j++) this.makeItem(j < 3 ? 'coin' : 'gear', obstacle.x + this.rand(5, obstacle.w - 5), obstacle.y + this.rand(5, obstacle.h - 5));
-      if (this.mode === 'assembly' && this.cratesBroken % 2 === 0) {
+      if (this.hasEquipment && this.cratesBroken % 2 === 0) {
         const missing = Object.keys(MODULES).filter(type => this.equipment[type] < MODULES[type].cap);
         if (missing.length) this.makeItem(missing[Math.floor(this.random() * missing.length)], obstacle.x + obstacle.w / 2, obstacle.y + obstacle.h / 2);
       }
@@ -287,7 +307,7 @@
       if (this.state !== 'playing') return;
       this.state = 'ended';
       this.sucking = false;
-      this.emit('end', { reason, score: this.score, banks: this.banks, items: this.collected, lost: this.cargoValue, mode: this.mode, goals: this.objectives.filter(goal => goal.current >= goal.target).length });
+      this.emit('end', { reason, score: this.score, banks: this.banks, items: this.collected, lost: this.cargoValue, mode: this.mode, level: this.levelIndex, elapsed: this.elapsed, goals: this.objectives.filter(goal => goal.current >= goal.target).length });
     }
     collidePlayer() {
       const p = this.player, r = this.radius;
@@ -315,6 +335,10 @@
       dt = clamp(dt, 0, .05);
       this.elapsed += dt;
       this.time = Math.max(0, this.duration - this.elapsed);
+      if (this.mode === 'survival' && this.survivalStage > this.lastSurvivalStage) {
+        this.lastSurvivalStage = this.survivalStage;
+        this.emit('stage', { stage: this.survivalStage });
+      }
       this.bankCooldown = Math.max(0, this.bankCooldown - dt);
       this.invincible = Math.max(0, this.invincible - dt);
       this.fullNotice = Math.max(0, this.fullNotice - dt);
@@ -379,7 +403,12 @@
         bomb.born = Math.max(0, bomb.born - dt);
         bomb.knockback = Math.max(0, (bomb.knockback || 0) - dt);
         const dist = distance(bomb, p);
-        if (this.sucking && bomb.knockback <= 0 && dist < this.range + 8 && !this.inBase(p)) {
+        if (this.mode === 'survival' && bomb.knockback <= 0) {
+          const drift = Math.min(100, 22 + (this.survivalStage - 1) * 6);
+          bomb.vx += (p.x - bomb.x) / Math.max(1, dist) * drift * 1.8 * dt;
+          bomb.vy += (p.y - bomb.y) / Math.max(1, dist) * drift * 1.8 * dt;
+        }
+        if (this.sucking && bomb.knockback <= 0 && dist < this.range + 8 && !(this.baseProtects && this.inBase(p))) {
           if (bomb.fuse < 0) { bomb.fuse = 2.6; this.emit('fuse'); }
           const force = 280 + (1 - dist / this.range) * 530;
           bomb.vx += (p.x - bomb.x) / Math.max(1, dist) * force * dt;
@@ -428,16 +457,16 @@
         if (fx.life <= 0) this.effects.splice(i, 1);
       }
       if (this.inBase(p)) this.bank();
+      if (this.mode === 'campaign' && this.health > 0 && this.objectives.every(goal => goal.current >= goal.target)) { this.end('complete'); return; }
       this.spawnClock += dt;
       if (this.spawnClock >= 1.6) { this.spawnClock = 0; for (let i = 0; i < 3 && this.items.length < 110; i++) this.spawnItem(); }
       this.bombClock += dt;
-      const interval = 8 - Math.min(3, this.elapsed / 15);
-      if (this.bombClock >= interval) { this.bombClock = 0; if (this.bombs.length < 5 + Math.floor(this.elapsed / 25)) this.spawnBomb(); }
+      if (this.bombClock >= this.bombInterval) { this.bombClock = 0; if (this.bombs.length < this.bombLimit) this.spawnBomb(); }
       if (this.time <= 0) this.end('time');
     }
   }
 
-  const api = { Game, TYPES, MODULES, clamp, distance };
+  const api = { Game, TYPES, MODULES, LEVELS, clamp, distance };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MagnetCore = api;
 })(typeof window !== 'undefined' ? window : globalThis);

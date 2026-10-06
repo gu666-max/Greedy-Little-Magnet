@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const { Game, MODULES, clamp } = window.MagnetCore;
+  const { Game, MODULES, LEVELS, clamp } = window.MagnetCore;
   const $ = id => document.getElementById(id);
   const canvas = $('game-canvas'), ctx = canvas.getContext('2d');
   const dom = Object.fromEntries(['score','timer','cargo','best-score','load-label','load-bar','load-note','hearts','pause-button','start-overlay','pause-overlay','result-overlay','help-overlay','event-toast'].map(id => [id, $(id)]));
@@ -8,8 +8,14 @@
     get(key, fallback) { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } },
     set(key, value) { try { localStorage.setItem(key, String(value)); } catch { /* Private/file browsing can deny storage; the game still works. */ } }
   };
-  let selectedMode = storage.get('greedy-magnet-mode-v1', 'assembly') === 'classic' ? 'classic' : 'assembly';
-  const bestKey = () => game.mode === 'assembly' ? 'greedy-magnet-best-assembly-v1' : 'greedy-magnet-best-v1';
+  const modes = ['campaign', 'classic', 'survival', 'assembly'];
+  const storedMode = storage.get('greedy-magnet-mode-v1', 'campaign');
+  let selectedMode = modes.includes(storedMode) ? storedMode : 'campaign';
+  const readNumber = key => { const n = Number(storage.get(key, '0')); return Number.isFinite(n) ? Math.max(0, n) : 0; };
+  let clearedLevels = clamp(Math.floor(readNumber('greedy-magnet-campaign-cleared-v1')), 0, LEVELS.length);
+  let selectedLevel = Math.min(clearedLevels, LEVELS.length - 1);
+  const bestKey = () => game.mode === 'classic' ? 'greedy-magnet-best-v1' : game.mode === 'campaign' ? `greedy-magnet-best-campaign-${game.levelIndex}-v1` : `greedy-magnet-best-${game.mode}-v1`;
+  const formatTime = value => { const s = Math.max(0, Math.floor(value)); return `${String(Math.floor(s / 60)).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}`; };
   let best = 0;
   let sound = storage.get('greedy-magnet-sound-v1', 'on') === 'on';
   let audioContext, lastCollectSound = 0;
@@ -37,7 +43,8 @@
   }
   function onEvent(event) {
     switch (event.type) {
-      case 'start': tone(440, .12); tone(660, .15, .035, .09); toast(event.mode === 'assembly' ? '先吸发光部件！组装能力后再去拆木箱' : '开工！把宝贝送回左下角绿色回收站', 3.5); break;
+      case 'start': tone(440, .12); tone(660, .15, .035, .09); toast(event.mode === 'campaign' ? `第 ${event.level + 1} 关：${game.level.name}，完成上方全部任务即可通关` : event.mode === 'survival' ? '活下去！炸弹会慢慢逼近，回收区也要躲避爆炸' : event.mode === 'assembly' ? '先吸发光部件！组装能力后再去拆木箱' : '开工！把宝贝送回左下角绿色回收站', 3.5); break;
+      case 'stage': toast(`危险阶段 ${event.stage}：炸弹增多，逼近速度提高！`, 3); tone(220, .2, .025); break;
       case 'install': {
         const module = MODULES[event.moduleType];
         tone(660, .12); tone(990, .17, .025, .1);
@@ -92,7 +99,8 @@
     const g = ground.getContext('2d');
     g.fillStyle = '#e6e6d4'; g.fillRect(0, 0, groundW, groundH);
     const gradient = g.createLinearGradient(0, 0, groundW, groundH);
-    gradient.addColorStop(0, '#eef0de'); gradient.addColorStop(1, '#dddfca');
+    const colors = game.mode === 'campaign' ? game.level.colors : game.mode === 'survival' ? ['#e8e3dc', '#d4ccc6'] : ['#eef0de', '#dddfca'];
+    gradient.addColorStop(0, colors[0]); gradient.addColorStop(1, colors[1]);
     g.fillStyle = gradient; g.fillRect(18, 24, groundW - 36, groundH - 42);
     let seed = 9238;
     const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
@@ -136,7 +144,7 @@
     rounded(x + 35, y - 6, 67, 24, 5, '#f5f2df', '#719476'); label('回收站', x + 68, y + 6, 12, '#54816a');
     rounded(x + 3, y + 68, 131, 9, 3, '#b8c9a3');
     label('↓ 进入绿区自动入账', b.x + b.w / 2, b.y + b.h - 19, 12, '#659365');
-    label('SAFE ZONE', b.x + b.w / 2, b.y + b.h + 24, 8, '#90a184', 'center', 700);
+    label(game.baseProtects ? 'SAFE ZONE' : '回收区仍需躲避炸弹', b.x + b.w / 2, b.y + b.h + 24, 8, '#90a184', 'center', 700);
     // Sign with an animated, subtle green status light.
     ellipse(x + 123, y + 10, 3.5, 3.5, `rgba(218,236,159,${.65 + Math.sin(t * 2) * .2})`);
   }
@@ -326,9 +334,12 @@
   function updateHud() {
     dom.score.innerHTML = `${game.score.toLocaleString('zh-CN')}<span>分</span>`;
     dom.cargo.innerHTML = `${game.cargoValue.toLocaleString('zh-CN')}<span>分</span>`;
-    const seconds = Math.ceil(game.time);
-    dom.timer.textContent = `${String(Math.floor(seconds / 60)).padStart(2,'0')}:${String(seconds % 60).padStart(2,'0')}`;
-    dom.timer.classList.toggle('timer-danger', seconds <= 10 && game.state === 'playing');
+    const survival = game.mode === 'survival';
+    const seconds = survival ? Math.floor(game.elapsed) : Math.ceil(game.time);
+    dom.timer.textContent = formatTime(seconds);
+    $('timer-label').textContent = survival ? '存活时间' : '剩余时间';
+    dom.timer.classList.toggle('timer-danger', !survival && seconds <= 10 && game.state === 'playing');
+    $('mode-progress').textContent = game.mode === 'campaign' ? `第 ${game.levelIndex + 1} 关 · ${game.level.name}　` + game.objectives.map(goal => `${goal.current >= goal.target ? '✓' : '○'} ${goal.label} ${Math.min(goal.current, goal.target)}/${goal.target}`).join('　') : survival ? `危险阶段 ${game.survivalStage} · 场上炸弹 ${game.bombs.length} · 每 30 秒升压　最佳存活 ${formatTime(readNumber('greedy-magnet-survival-time-v1'))}` : game.mode === 'classic' ? '限时挑战 · 60 秒内尽可能多赚钱 · 只计算已入账分数' : '废品战车 · 90 秒组装挑战';
     const heavy = game.load > .66, mid = game.load > .3;
     dom['load-label'].textContent = heavy ? '贪心超载' : mid ? '有点沉了' : '轻装上阵';
     dom['load-note'].textContent = heavy ? '快去回收，转弯越来越难！' : mid ? '赚得不错，记得回去存钱' : '还很灵活，去捡点宝贝吧';
@@ -337,7 +348,7 @@
     dom.hearts.innerHTML = Array.from({length:3}, (_, i) => `<span${i >= game.health ? ' class="lost"' : ''}>♥</span>`).join(' ');
     dom.hearts.setAttribute('aria-label', `${game.health}格生命`);
     dom['pause-button'].disabled = game.state !== 'playing' && game.state !== 'paused';
-    const assembly = game.mode === 'assembly';
+    const assembly = game.hasEquipment;
     $('assembly-strip').classList.toggle('hidden', !assembly);
     if (assembly) {
       for (const [type, module] of Object.entries(MODULES)) {
@@ -349,25 +360,37 @@
       $('dash-button').innerHTML = game.dashCooldown > 0 ? `冷却 ${game.dashCooldown.toFixed(1)} 秒` : `弹簧冲刺 <kbd>Q</kbd>`;
       $('touch-dash').disabled = $('dash-button').disabled;
       $('touch-dash').textContent = game.dashCooldown > 0 ? `${game.dashCooldown.toFixed(1)}s` : game.equipment.spring ? 'ϟ 冲刺' : 'ϟ 找弹簧';
-      $('mission-list').innerHTML = game.objectives.map(goal => `<span class="${goal.current >= goal.target ? 'done' : ''}">${goal.current >= goal.target ? '✓' : '○'} ${goal.label} <b>${Math.min(goal.current,goal.target)}/${goal.target}</b></span>`).join('');
+      $('mission-list').innerHTML = game.mode === 'assembly' ? game.objectives.map(goal => `<span class="${goal.current >= goal.target ? 'done' : ''}">${goal.current >= goal.target ? '✓' : '○'} ${goal.label} <b>${Math.min(goal.current,goal.target)}/${goal.target}</b></span>`).join('') : '';
     }
     $('touch-dash').classList.toggle('hidden',!assembly);
   }
   function hideOverlays() { for (const key of ['start-overlay','pause-overlay','result-overlay','help-overlay']) dom[key].classList.add('hidden'); }
+  function returnHome() { clearInput(); hideOverlays(); game.home(); selectMode(selectedMode); dom['start-overlay'].classList.remove('hidden'); texts.length = rings.length = 0; updateHud(); }
   function clearInput() { keys.clear(); holds.clear(); mainPointer = null; $('touch-magnet').textContent = '按住吸取'; game.sucking = false; game.target = { x: game.player.x, y: game.player.y }; }
-  function startGame() { unlockAudio(); clearInput(); texts.length = rings.length = 0; hideOverlays(); game.start(selectedMode); ground = null; updateHud(); canvas.focus({preventScroll:true}); }
+  function startGame() {
+    if (selectedMode === 'campaign' && selectedLevel > clearedLevels) return;
+    unlockAudio(); clearInput(); texts.length = rings.length = 0; hideOverlays(); game.start(selectedMode, selectedLevel); ground = null; loadBest(); updateHud(); canvas.focus({preventScroll:true});
+  }
+  function loadBest() { best = readNumber(bestKey()); dom['best-score'].textContent = best.toLocaleString('zh-CN'); }
+  function renderLevels() {
+    $('level-select').classList.toggle('hidden', selectedMode !== 'campaign');
+    $('level-select').innerHTML = LEVELS.map((level, i) => `<button class="level-option${i === selectedLevel ? ' active' : ''}" data-level="${i}" aria-pressed="${i === selectedLevel}" ${i > clearedLevels ? 'disabled' : ''}><b>${i > clearedLevels ? '🔒' : i < clearedLevels ? '✓' : '○'} ${i + 1}. ${level.name}</b><small>${i > clearedLevels ? '通过上一关解锁' : `${level.duration} 秒 · ${i < clearedLevels ? '已通关，可重玩' : '待挑战'}`}</small></button>`).join('');
+  }
   function selectMode(mode) {
-    if (game.state !== 'ready') return;
-    selectedMode = mode; game.mode = mode; game.reset(); ground = null;
+    if (game.state !== 'ready' || !modes.includes(mode)) return;
+    selectedMode = mode; game.mode = mode; game.levelIndex = selectedLevel; game.reset(); ground = null;
     storage.set('greedy-magnet-mode-v1', mode);
     const assembly = mode === 'assembly';
-    for (const option of ['assembly','classic']) { $(`mode-${option}`).classList.toggle('active',option===mode); $(`mode-${option}`).setAttribute('aria-pressed',String(option===mode)); }
-    $('mode-edition').textContent = assembly ? '组装挑战 · 90 秒' : '经典回收 · 60 秒';
-    $('field-mode').textContent = assembly ? 'ASSEMBLY / 01' : 'SCRAPYARD / 01';
-    $('start-title').innerHTML = assembly ? '吸成一台战车。<br>还能开得回来吗？' : '宝贝都归你。<br>前提是，带得回来。';
-    $('start-description').innerHTML = assembly ? '吸锯片、装甲、弹簧和撞击头，边捡边组装。<br>完成三项挑战，再把宝贝送回回收站！' : '吸走零件和金币，送回绿色回收站。<br>贪得越多，身体越笨重。小心炸弹也会被吸来！';
-    $('start-duration').textContent = assembly ? '90 秒一局' : '60 秒一局';
-    best = Math.max(0,Number(storage.get(bestKey(),'0')) || 0); dom['best-score'].textContent=best.toLocaleString('zh-CN');
+    for (const option of modes) { $(`mode-${option}`).classList.toggle('active',option===mode); $(`mode-${option}`).setAttribute('aria-pressed',String(option===mode)); }
+    const campaign = mode === 'campaign', survival = mode === 'survival';
+    $('mode-edition').textContent = campaign ? `闯关 · 第 ${selectedLevel + 1} 关` : survival ? '生存 · 无限时间' : assembly ? '组装挑战 · 90 秒' : '限时挑战 · 60 秒';
+    $('field-mode').textContent = campaign ? `第 ${selectedLevel + 1} 关 / ${game.level.name}` : survival ? 'SURVIVAL / 生存' : assembly ? 'ASSEMBLY / 01' : 'TIME ATTACK / 60S';
+    $('start-title').innerHTML = campaign ? '一张新地图。<br>一场新挑战。' : survival ? '这次没有倒计时。<br>你能撑多久？' : assembly ? '吸成一台战车。<br>还能开得回来吗？' : '宝贝都归你。<br>前提是，带得回来。';
+    $('start-description').textContent = campaign ? `${game.level.duration} 秒内：${game.level.goals.map(goal => goal.label).join('、')}。全部完成立即通关。` : survival ? '三格生命，没有时间上限。炸弹逐渐增多并逼近，回收区也会受伤。吸部件组装战车，尽量活得更久！' : assembly ? '吸锯片、装甲、弹簧和撞击头，边捡边组装。完成三项挑战，再把宝贝送回回收站！' : '吸走零件和金币，送回绿色回收站。60 秒内尽可能多赚钱，小心炸弹也会被吸来！';
+    $('start-duration').textContent = campaign ? `${clearedLevels}/${LEVELS.length} 关已通关` : survival ? '生命耗尽结束' : assembly ? '90 秒一局' : '60 秒一局';
+    $('start-button').innerHTML = campaign ? `挑战第 ${selectedLevel + 1} 关 <span>→</span>` : survival ? '开始生存 <span>→</span>' : '开工，吸点宝贝 <span>↗</span>';
+    $('mode-help').textContent = campaign ? '在倒计时结束前完成场地上方全部目标即可通关；时间或生命耗尽则失败，可重试。通关解锁下一关，已解锁关卡可重玩。切换页面自动暂停。' : survival ? '生存没有固定结束时间，每 30 秒提高危险阶段：炸弹更多、更快逼近。回收区也会受伤，生命耗尽后结算存活时间与已入账分数。切换页面自动暂停。' : '时间结束只结算已回收分数。切换页面会自动暂停。';
+    renderLevels(); loadBest();
     updateHud();
   }
   function pauseGame() {
@@ -383,6 +406,24 @@
     $('result-score').textContent = result.score.toLocaleString('zh-CN');
     $('result-banks').textContent = result.banks; $('result-items').textContent = result.items; $('result-lost').textContent = result.lost;
     $('result-comment').textContent = result.lost > 0 ? `还有 ${result.lost} 分没来得及回收。下次早点回来！` : result.reason === 'health' ? '远远甩出零件，可以提前引爆炸弹。' : '这次存得很及时。下一把，再多吸一点？';
+    $('again-button').textContent = result.mode === 'campaign' ? '重玩这一关' : '再来一局 →';
+    $('next-level-button').classList.add('hidden');
+    if (result.mode === 'campaign') {
+      const complete = result.reason === 'complete';
+      if (complete) { clearedLevels = Math.max(clearedLevels, result.level + 1); storage.set('greedy-magnet-campaign-cleared-v1', clearedLevels); }
+      $('result-kicker').textContent = `第 ${result.level + 1} 关 · ${game.level.name}`;
+      $('result-title').textContent = complete ? result.level === LEVELS.length - 1 ? '三关全通，漂亮！' : '任务完成，下一站！' : result.reason === 'health' ? '生命耗尽，再试一次。' : '时间到了，任务还差一点。';
+      $('result-comment').textContent = complete ? result.level === LEVELS.length - 1 ? '目前三张地图已全部通关，可以重玩，或试试限时与生存模式。' : `已解锁第 ${result.level + 2} 关：${LEVELS[result.level + 1].name}。` : `完成 ${result.goals}/${game.objectives.length} 项任务。${game.objectives.filter(goal => goal.current < goal.target).map(goal => `${goal.label}：${goal.current}/${goal.target}`).join('；')}。`;
+      $('next-level-button').classList.toggle('hidden', !complete || result.level === LEVELS.length - 1);
+      renderLevels();
+    }
+    if (result.mode === 'survival') {
+      const previousTime = readNumber('greedy-magnet-survival-time-v1');
+      if (result.elapsed > previousTime) storage.set('greedy-magnet-survival-time-v1', result.elapsed);
+      $('result-kicker').textContent = result.elapsed > previousTime ? '新存活纪录' : '生存挑战结束';
+      $('result-title').textContent = `坚持了 ${formatTime(result.elapsed)}`;
+      $('result-comment').textContent = `危险阶段 ${game.survivalStage} · 最佳存活 ${formatTime(Math.max(previousTime, result.elapsed))} · 最高入账 ${best.toLocaleString('zh-CN')} 分。下次试试更轻的负重和部件组合！`;
+    }
     if (result.mode === 'assembly') {
       $('result-title').textContent = result.goals === 3 ? '战车大师，挑战全达成！' : result.reason === 'health' ? '这台战车，下次再升级。' : '废品战车，收工！';
       $('result-comment').textContent = `挑战完成 ${result.goals}/3 · 拆箱 ${game.cratesBroken} 个 · 组装 ${game.installedKinds.size} 种。${result.lost ? `还有 ${result.lost} 分没回收。` : '继续尝试不同组合吧！'}`;
@@ -430,15 +471,18 @@
   window.addEventListener('keyup', event => { keys.delete(event.code); if (event.code === 'Space') { if (game.state === 'playing') event.preventDefault(); setHold('space', false); } });
   document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
   window.addEventListener('blur', pauseGame);
-  function openHelp() { helpWasPlaying = game.state === 'playing'; if (helpWasPlaying) { game.pause(); clearInput(); } $('assembly-help').classList.toggle('hidden',game.mode!=='assembly'); dom['help-overlay'].classList.remove('hidden'); $('close-help-button').focus({preventScroll:true}); updateHud(); }
+  function openHelp() { helpWasPlaying = game.state === 'playing'; if (helpWasPlaying) { game.pause(); clearInput(); } $('assembly-help').classList.toggle('hidden',!game.hasEquipment); dom['help-overlay'].classList.remove('hidden'); $('close-help-button').focus({preventScroll:true}); updateHud(); }
   function closeHelp() { dom['help-overlay'].classList.add('hidden'); if (helpWasPlaying) { game.resume(); canvas.focus({preventScroll:true}); } helpWasPlaying = false; updateHud(); }
   $('start-button').addEventListener('click', startGame); $('again-button').addEventListener('click', startGame); $('restart-button').addEventListener('click', startGame);
   $('resume-button').addEventListener('click', resumeGame);
   $('pause-button').addEventListener('click', () => game.state === 'paused' ? resumeGame() : pauseGame());
-  $('home-button').addEventListener('click', () => { hideOverlays(); game.home(); dom['start-overlay'].classList.remove('hidden'); texts.length = rings.length = 0; updateHud(); });
+  $('home-button').addEventListener('click', returnHome);
+  $('pause-home-button').addEventListener('click', returnHome);
+  $('next-level-button').addEventListener('click', () => { if (game.state !== 'ended' || selectedMode !== 'campaign' || selectedLevel >= LEVELS.length - 1 || selectedLevel + 1 > clearedLevels) return; selectedLevel++; game.home(); selectMode(selectedMode); startGame(); });
   $('sound-button').addEventListener('click', () => { sound = !sound; storage.set('greedy-magnet-sound-v1', sound ? 'on' : 'off'); updateSoundButton(); if (sound) { unlockAudio(); tone(659, .08); } });
   $('help-button').addEventListener('click', openHelp); $('close-help-button').addEventListener('click', closeHelp);
-  $('mode-assembly').addEventListener('click', () => selectMode('assembly')); $('mode-classic').addEventListener('click', () => selectMode('classic'));
+  for (const mode of modes) $(`mode-${mode}`).addEventListener('click', () => selectMode(mode));
+  $('level-select').addEventListener('click', event => { const button = event.target.closest('[data-level]'); if (!button || button.disabled || game.state !== 'ready') return; const level = Number(button.dataset.level); if (level > clearedLevels) return; selectedLevel = level; selectMode('campaign'); });
   $('dash-button').addEventListener('click', () => { unlockAudio(); game.dash(keyboardInput()); canvas.focus({preventScroll:true}); });
   $('touch-dash').addEventListener('click', () => { unlockAudio(); game.dash(keyboardInput()); });
   function keyboardInput() { return { x: Number(keys.has('KeyD') || keys.has('ArrowRight')) - Number(keys.has('KeyA') || keys.has('ArrowLeft')), y: Number(keys.has('KeyS') || keys.has('ArrowDown')) - Number(keys.has('KeyW') || keys.has('ArrowUp')) }; }
@@ -466,6 +510,6 @@
     if (toastDeadline && now > toastDeadline) { dom['event-toast'].classList.remove('visible'); toastDeadline = 0; }
     requestAnimationFrame(frame);
   }
-  const assemblyHelp = document.createElement('p'); assemblyHelp.id='assembly-help'; assemblyHelp.textContent='战车部件自动安装，回收和甩出不会卸掉：锯片切箱、装甲挡一次爆炸、前置撞击头顶碎木箱；装上弹簧后，用 Q / Shift 或按钮冲刺，撞击头可击飞炸弹。冲刺冷却5秒，普通移动仍需躲炸弹。本局完成三项目标获得满挑战评价。'; $('close-help-button').before(assemblyHelp);
+  const assemblyHelp = document.createElement('p'); assemblyHelp.id='assembly-help'; assemblyHelp.textContent='战车部件自动安装，回收和甩出不会卸掉：锯片切箱、装甲挡一次爆炸、前置撞击头顶碎木箱；装上弹簧后，用 Q / Shift 或按钮冲刺，撞击头可击飞炸弹。冲刺冷却5秒，普通移动仍需躲炸弹。重开或下一关清空装备。'; $('close-help-button').before(assemblyHelp);
   updateSoundButton(); selectMode(selectedMode); resize(); updateHud(); requestAnimationFrame(frame);
 })();
