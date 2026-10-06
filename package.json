@@ -1,0 +1,10 @@
+{
+  "name": "greedy-magnet",
+  "version": "1.0.0",
+  "private": true,
+  "description": "贪心小磁铁：可离线游玩的60秒浏览器小游戏",
+  "scripts": {
+    "start": "node server.cjs",
+    "test": "node --test tests/game-core.test.cjs"
+  }
+}

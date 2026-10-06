@@ -1,0 +1,18 @@
+# Local project memory entry points contain machine-specific absolute paths.
+/AGENTS.md
+/API_MEMORY_BOOTSTRAP.md
+/Get-ProjectMemory.ps1
+/project-memory-context.md
+
+# Dependencies, local settings, generated screenshots and archives.
+node_modules/
+.env
+.env.*
+!.env.example
+tests/artifacts/
+preview-*.png
+*.log
+*.zip
+.DS_Store
+Thumbs.db
+.vscode/
